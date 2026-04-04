@@ -9,7 +9,15 @@ def test_package_importable():
 
 
 def test_subpackages_importable():
-    for sub in ["ingest", "normalize", "validate", "reconcile", "reporting", "strategy"]:
+    for sub in [
+        "contracts",
+        "ingest",
+        "normalize",
+        "validate",
+        "reconcile",
+        "reporting",
+        "strategy",
+    ]:
         mod = importlib.import_module(f"qsr_audit.{sub}")
         assert mod is not None
 
