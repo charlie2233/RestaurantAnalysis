@@ -15,7 +15,7 @@ run-ingest:
 	qsr-audit ingest-workbook --input data/raw/source_workbook.xlsx
 
 run-validate:
-	qsr-audit validate --layer silver
+	qsr-audit validate-workbook --input data/silver --tolerance-auv 0.05
 
 run-report:
 	qsr-audit report --output reports/

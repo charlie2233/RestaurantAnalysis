@@ -47,7 +47,7 @@ class ValidationFinding:
             "row_number": self.row_number,
             "expected": self.expected,
             "observed": self.observed,
-            "details": self.details,
+            "details": _json_safe(self.details),
         }
 
 
@@ -79,3 +79,18 @@ class ValidationRun:
         for finding in self.findings:
             counts[finding.severity] += 1
         return counts
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    if hasattr(value, "item") and callable(value.item):
+        try:
+            return value.item()
+        except (TypeError, ValueError):
+            return str(value)
+    return value

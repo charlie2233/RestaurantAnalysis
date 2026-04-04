@@ -122,25 +122,7 @@ def check_brand_alignment(
     missing_ai_brands = sorted(core_brands - ai_brands)
     overlap = sorted(core_brands & ai_brands)
 
-    findings = [
-        ValidationFinding(
-            severity="info",
-            category="cross_sheet",
-            check_name="brand_alignment.coverage",
-            dataset="cross_sheet",
-            sheet_name="AI策略与落地效果",
-            message=(
-                f"AI sheet covers {len(overlap)} of {len(core_brands)} core brands "
-                f"({len(missing_ai_brands)} core brands have no AI row yet)."
-            ),
-            details={
-                "core_brand_count": len(core_brands),
-                "ai_brand_count": len(ai_brands),
-                "overlap_count": len(overlap),
-                "missing_ai_brands": missing_ai_brands,
-            },
-        )
-    ]
+    findings = []
 
     if extra_ai_brands:
         findings.append(
@@ -155,6 +137,60 @@ def check_brand_alignment(
                 ),
                 sheet_name="AI策略与落地效果",
                 details={"extra_ai_brands": extra_ai_brands},
+            )
+        )
+
+    if missing_ai_brands:
+        findings.append(
+            ValidationFinding(
+                severity="warning",
+                category="cross_sheet",
+                check_name="brand_alignment.missing_ai_brands",
+                dataset="core_brand_metrics",
+                message=(
+                    "Core brands are missing corresponding AI strategy rows: "
+                    + ", ".join(missing_ai_brands)
+                ),
+                sheet_name="AI策略与落地效果",
+                details={"missing_ai_brands": missing_ai_brands},
+            )
+        )
+
+    if not extra_ai_brands and not missing_ai_brands:
+        findings.append(
+            ValidationFinding(
+                severity="info",
+                category="cross_sheet",
+                check_name="brand_alignment.exact_match",
+                dataset="cross_sheet",
+                sheet_name="AI策略与落地效果",
+                message=(f"AI sheet brands align exactly with all {len(core_brands)} core brands."),
+                details={
+                    "core_brand_count": len(core_brands),
+                    "ai_brand_count": len(ai_brands),
+                    "overlap_count": len(overlap),
+                },
+            )
+        )
+    else:
+        findings.append(
+            ValidationFinding(
+                severity="info",
+                category="cross_sheet",
+                check_name="brand_alignment.coverage",
+                dataset="cross_sheet",
+                sheet_name="AI策略与落地效果",
+                message=(
+                    f"AI sheet covers {len(overlap)} of {len(core_brands)} core brands "
+                    f"({len(missing_ai_brands)} missing; {len(extra_ai_brands)} extra)."
+                ),
+                details={
+                    "core_brand_count": len(core_brands),
+                    "ai_brand_count": len(ai_brands),
+                    "overlap_count": len(overlap),
+                    "missing_ai_brands": missing_ai_brands,
+                    "extra_ai_brands": extra_ai_brands,
+                },
             )
         )
 

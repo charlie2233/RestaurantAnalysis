@@ -239,7 +239,11 @@ def _schema_error_findings(
             category=SCHEMA_TYPE_CATEGORY,
             check_name=f"{table_name}.schema",
             dataset=table_name,
-            message=f"{table_name} failed schema validation.",
+            message=(
+                f"{table_name} failed schema validation with "
+                f"{len(failure_cases) if isinstance(failure_cases, pd.DataFrame) else 'unknown'} "
+                "failure case(s)."
+            ),
             sheet_name=sheet_name,
             details={
                 "error_count": len(failure_cases)
@@ -255,26 +259,102 @@ def _schema_error_findings(
         column_name = str(row.get("column")) if pd.notna(row.get("column")) else None
         index_value = row.get("index")
         record = _frame_record_at_index(frame, index_value)
+        category = _classify_failure_case(row)
+        row_number = _record_row_number(record)
+        failure_case = row.get("failure_case")
+        check_name = row.get("check")
         findings.append(
             ValidationFinding(
                 severity="error",
-                category=SCHEMA_TYPE_CATEGORY,
+                category=category,
                 check_name=f"{table_name}.schema.row",
                 dataset=table_name,
-                message=(
-                    f"{table_name} row {index_value} failed schema validation"
-                    + (f" on column `{column_name}`." if column_name else ".")
+                message=_render_failure_message(
+                    table_name=table_name,
+                    category=category,
+                    column_name=column_name,
+                    row_number=row_number,
+                    index_value=index_value,
+                    check_name=check_name,
+                    failure_case=failure_case,
                 ),
                 sheet_name=sheet_name,
                 field_name=column_name,
                 brand_name=_record_brand_name(record),
-                row_number=_record_row_number(record),
-                observed=str(row.get("failure_case")),
+                row_number=row_number,
+                observed=_stringify_failure_case(failure_case),
                 details=row,
             )
         )
 
     return findings
+
+
+def _classify_failure_case(row: dict[str, object]) -> str:
+    check_name = str(row.get("check") or "").casefold()
+    failure_case = row.get("failure_case")
+
+    if _is_null_failure(failure_case) or "not_nullable" in check_name:
+        return "null"
+
+    allowed_range_tokens = (
+        "in_range",
+        "greater_than",
+        "less_than",
+        "equal_to",
+        "str_length",
+        "isin",
+    )
+    if any(token in check_name for token in allowed_range_tokens):
+        return "allowed_range"
+
+    return SCHEMA_TYPE_CATEGORY
+
+
+def _render_failure_message(
+    *,
+    table_name: str,
+    category: str,
+    column_name: str | None,
+    row_number: int | None,
+    index_value: object,
+    check_name: object,
+    failure_case: object,
+) -> str:
+    row_label = f"source row {row_number}" if row_number is not None else f"frame row {index_value}"
+    column_label = column_name or "unknown_column"
+    failure_text = _stringify_failure_case(failure_case)
+    check_text = str(check_name) if check_name else "schema check"
+
+    if category == "null":
+        return f"`{table_name}.{column_label}` is null or missing at {row_label}."
+
+    if category == "allowed_range":
+        return (
+            f"`{table_name}.{column_label}` has value `{failure_text}` at {row_label} "
+            f"that violates `{check_text}`."
+        )
+
+    return (
+        f"`{table_name}.{column_label}` failed `{check_text}` at {row_label} "
+        f"with value `{failure_text}`."
+    )
+
+
+def _is_null_failure(value: object) -> bool:
+    if value is None:
+        return True
+    if pd.isna(value):
+        return True
+    return str(value).strip().casefold() in {"", "none", "null", "nan", "<na>"}
+
+
+def _stringify_failure_case(value: object) -> str:
+    if value is None:
+        return "None"
+    if isinstance(value, float) and pd.isna(value):
+        return "NaN"
+    return str(value)
 
 
 def _record_brand_name(record: pd.Series | None) -> str | None:

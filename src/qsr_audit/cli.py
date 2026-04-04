@@ -10,6 +10,7 @@ from rich.console import Console
 
 from qsr_audit.config import get_settings
 from qsr_audit.ingest import ingest_workbook as ingest_workbook_pipeline
+from qsr_audit.validate import validate_workbook as validate_workbook_pipeline
 
 app = typer.Typer(name="qsr-audit", help="QSR workbook audit pipeline CLI.")
 console = Console()
@@ -24,6 +25,20 @@ InputWorkbookOption = Annotated[
         readable=True,
         path_type=Path,
         help="Path to the source workbook.",
+    ),
+]
+
+ValidationInputOption = Annotated[
+    Path,
+    typer.Option(
+        ...,
+        "--input",
+        exists=True,
+        file_okay=True,
+        dir_okay=True,
+        readable=True,
+        path_type=Path,
+        help="Path to a raw workbook, Silver directory, or Silver parquet file.",
     ),
 ]
 
@@ -62,6 +77,42 @@ def validate(
     """Validate data in the specified layer."""
 
     console.print(f"[bold blue]Validate[/bold blue] - layer: {layer} (not yet implemented)")
+
+
+@app.command("validate-workbook")
+def validate_workbook_command(
+    input_path: ValidationInputOption,
+    tolerance_auv: float = typer.Option(
+        0.05,
+        "--tolerance-auv",
+        min=0.0,
+        help="Maximum allowed relative delta between recorded and implied AUV.",
+    ),
+) -> None:
+    """Validate normalized workbook tables from a raw workbook or Silver path."""
+
+    run = validate_workbook_pipeline(
+        input_path=input_path,
+        settings=get_settings(),
+        tolerance_auv=tolerance_auv,
+    )
+    counts = run.counts
+    status_label = "passed" if run.passed else "failed"
+    status_color = "green" if run.passed else "red"
+
+    console.print(
+        f"[bold {status_color}]Validation {status_label}[/bold {status_color}] - {input_path}"
+    )
+    console.print(f"Errors: {counts['error']}")
+    console.print(f"Warnings: {counts['warning']}")
+    console.print(f"Info: {counts['info']}")
+    if run.artifacts is not None:
+        console.print(f"Summary: {run.artifacts.summary_markdown}")
+        console.print(f"Results JSON: {run.artifacts.results_json}")
+        console.print(f"Validation flags: {run.artifacts.flags_parquet}")
+
+    if not run.passed:
+        raise typer.Exit(code=1)
 
 
 @app.command()

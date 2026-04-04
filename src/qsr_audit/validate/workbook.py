@@ -94,23 +94,40 @@ def load_validation_tables(source_path: Path) -> tuple[str, ValidationTables]:
     """Load normalized validation tables from either raw workbook or Silver directory."""
 
     if source_path.is_file():
-        if source_path.suffix.lower() not in {".xlsx", ".xlsm", ".xls"}:
-            raise ValueError(f"Unsupported workbook input: {source_path}")
-        raw_sheets = load_workbook_sheets(source_path)
-        core_brand_metrics = normalize_core_brand_metrics(raw_sheets["QSR Top30 核心数据"])
-        ai_strategy_registry = normalize_ai_strategy_registry(raw_sheets["AI策略与落地效果"])
-        data_notes, key_findings = normalize_data_notes_and_key_findings(
-            raw_sheets["数据说明与来源"]
-        )
-        return (
-            "raw_workbook",
-            ValidationTables(
-                core_brand_metrics=core_brand_metrics,
-                ai_strategy_registry=ai_strategy_registry,
-                data_notes=data_notes,
-                key_findings=key_findings,
-            ),
-        )
+        if source_path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
+            raw_sheets = load_workbook_sheets(source_path)
+            core_brand_metrics = normalize_core_brand_metrics(raw_sheets["QSR Top30 核心数据"])
+            ai_strategy_registry = normalize_ai_strategy_registry(raw_sheets["AI策略与落地效果"])
+            data_notes, key_findings = normalize_data_notes_and_key_findings(
+                raw_sheets["数据说明与来源"]
+            )
+            return (
+                "raw_workbook",
+                ValidationTables(
+                    core_brand_metrics=core_brand_metrics,
+                    ai_strategy_registry=ai_strategy_registry,
+                    data_notes=data_notes,
+                    key_findings=key_findings,
+                ),
+            )
+
+        if source_path.suffix.lower() == ".parquet":
+            silver_dir = _resolve_silver_dir(source_path.parent)
+            return (
+                "silver_parquet",
+                ValidationTables(
+                    core_brand_metrics=pd.read_parquet(
+                        silver_dir / SILVER_OUTPUT_FILES["core_brand_metrics"]
+                    ),
+                    ai_strategy_registry=pd.read_parquet(
+                        silver_dir / SILVER_OUTPUT_FILES["ai_strategy_registry"]
+                    ),
+                    data_notes=pd.read_parquet(silver_dir / SILVER_OUTPUT_FILES["data_notes"]),
+                    key_findings=pd.read_parquet(silver_dir / SILVER_OUTPUT_FILES["key_findings"]),
+                ),
+            )
+
+        raise ValueError(f"Unsupported validation input: {source_path}")
 
     if source_path.is_dir():
         silver_dir = _resolve_silver_dir(source_path)

@@ -36,10 +36,10 @@ data/raw/          ← original workbooks, untouched
     ▼  qsr-audit ingest-workbook --input <source>
 data/bronze/       ← raw data parsed into Parquet, schema-tagged, provenance recorded
     │
-    ▼  qsr-audit validate --layer bronze
+    ▼  qsr-audit validate-workbook --input <raw workbook or silver path>
 data/silver/       ← cleaned, normalised, de-duplicated, type-cast
     │
-    ▼  qsr-audit validate --layer silver
+    ▼  qsr-audit validate-workbook --input data/silver --tolerance-auv 0.05
 data/gold/         ← reconciled, aggregated, ready for reporting
     │
     ▼  qsr-audit report --output reports/
@@ -62,7 +62,7 @@ make setup
 qsr-audit ingest-workbook --input data/raw/source_workbook.xlsx
 
 # 3. Validate the Silver layer
-qsr-audit validate --layer silver
+qsr-audit validate-workbook --input data/silver --tolerance-auv 0.05
 
 # 4. Generate reports
 qsr-audit report --output reports/
