@@ -38,3 +38,7 @@ mlflow.db
 # Reports
 reports/*
 !reports/.gitkeep
+
+# Strategy outputs
+strategy/*
+!strategy/.gitkeep

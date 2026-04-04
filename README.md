@@ -43,7 +43,7 @@ data/silver/       ← cleaned, normalised, de-duplicated, type-cast
 data/gold/         ← reconciled, aggregated, ready for reporting
     │
     ▼  qsr-audit report --output reports/
-reports/           ← HTML / PDF / Excel audit reports
+reports/           ← Audit scorecards plus Gold-only strategy playbooks
 ```
 
 Only Gold-layer outputs are safe for downstream reporting and strategy. Bronze and
@@ -70,7 +70,7 @@ qsr-audit run-syntheticness --input data/silver/core_brand_metrics.parquet
 # 5. Reconcile against manual reference inputs
 qsr-audit reconcile --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
 
-# 6. Generate reports
+# 6. Generate audit and strategy reports from Gold outputs
 qsr-audit report --output reports/
 ```
 
@@ -96,7 +96,7 @@ reconciliation; it is never treated as silent confirmation.
 2. `normalize` -> standardise column names, types, and business definitions into Silver.
 3. `validate` -> enforce layer-specific schemas and data quality checks.
 4. `reconcile` -> compare claims across sources and promote trusted outputs into Gold.
-5. `report` -> generate audit and strategy/reporting outputs from Gold only.
+5. `report` -> generate audit scorecards and downstream strategy playbooks from Gold only. The rules-based strategy outputs land in `strategy/` and `reports/strategy/` and should be read alongside validation and reconciliation summaries.
 
 ---
 
@@ -111,6 +111,7 @@ Settings are read from environment variables (prefix `QSR_`) or a `.env` file:
 | `QSR_DATA_SILVER` | `data/silver` | Silver layer directory |
 | `QSR_DATA_GOLD` | `data/gold` | Gold layer directory |
 | `QSR_REPORTS_DIR` | `reports` | Report output directory |
+| `QSR_STRATEGY_DIR` | `strategy` | Strategy recommendation output directory |
 | `QSR_LOG_LEVEL` | `INFO` | Logging verbosity |
 
 ---
@@ -139,7 +140,7 @@ ruff check src tests && pytest --cov=src --cov-report=term-missing
 | 3 | `validate` | 🔲 Stub | Pandera schema checks per layer |
 | 4 | `reconcile` | 🔲 Stub | Cross-source reconciliation & variance flagging |
 | 5 | `reporting` | 🔲 Stub | Jinja2-templated HTML/PDF/Excel reports |
-| 6 | `strategy` | 🔲 Stub | Insight rules & anomaly detection (scikit-learn) |
+| 6 | `strategy` | 🟡 Rules-based | Gold-only strategy recommendations and archetype playbooks |
 | 7 | `dashboard` | 🔲 Stub | Interactive audit dashboard (Streamlit/Dash) |
 | 8 | DVC pipeline | 🔲 Stub | Reproducible data pipeline via DVC |
 | 9 | MLflow tracking | 🔲 Stub | Experiment tracking for model-based checks |
@@ -170,7 +171,8 @@ qsr-audit-pipeline/
 ├── dashboard/         # Dashboard stub
 ├── dvc/               # DVC pipeline stub
 ├── mlflow/            # MLflow config stub
-├── reports/           # Generated report outputs
+├── reports/           # Generated audit outputs and strategy playbooks
+├── strategy/          # Generated strategy recommendation parquet/json outputs
 ├── docs/
 ├── Makefile
 ├── pyproject.toml

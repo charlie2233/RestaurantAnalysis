@@ -12,6 +12,7 @@ from qsr_audit.config import get_settings
 from qsr_audit.ingest import ingest_workbook as ingest_workbook_pipeline
 from qsr_audit.reconcile import reconcile_core_metrics as reconcile_core_metrics_pipeline
 from qsr_audit.reporting import write_reports as write_reports_pipeline
+from qsr_audit.strategy import generate_strategy_outputs as generate_strategy_outputs_pipeline
 from qsr_audit.validate import run_syntheticness as run_syntheticness_pipeline
 from qsr_audit.validate import validate_workbook as validate_workbook_pipeline
 
@@ -209,12 +210,24 @@ def report(
 ) -> None:
     """Generate audit reports from Gold-layer data."""
 
-    artifacts = write_reports_pipeline(output_root=output, settings=get_settings())
+    settings = get_settings()
+    artifacts = write_reports_pipeline(output_root=output, settings=settings)
+    strategy_run = generate_strategy_outputs_pipeline(
+        settings=settings,
+        report_dir=output / "strategy",
+    )
     console.print(f"[bold yellow]Analyst reports generated[/bold yellow] - {output}")
     console.print(f"Global markdown: {artifacts.global_markdown}")
     console.print(f"Global HTML: {artifacts.global_html}")
     console.print(f"Global JSON: {artifacts.global_json}")
     console.print(f"Brand markdown files: {len(artifacts.brand_markdown_paths)}")
+    console.print(
+        f"Strategy recommendations parquet: {strategy_run.artifacts.recommendations_parquet_path}"
+    )
+    console.print(
+        f"Strategy recommendations JSON: {strategy_run.artifacts.recommendations_json_path}"
+    )
+    console.print(f"Strategy playbook: {strategy_run.artifacts.playbook_markdown_path}")
 
 
 if __name__ == "__main__":

@@ -22,7 +22,16 @@ def _build_settings(tmp_path: Path) -> Settings:
     gold_dir = tmp_path / "gold"
     reference_dir = tmp_path / "reference"
     reports_dir = tmp_path / "reports"
-    for directory in [raw_dir, bronze_dir, silver_dir, gold_dir, reference_dir, reports_dir]:
+    strategy_dir = tmp_path / "strategy"
+    for directory in [
+        raw_dir,
+        bronze_dir,
+        silver_dir,
+        gold_dir,
+        reference_dir,
+        reports_dir,
+        strategy_dir,
+    ]:
         directory.mkdir(parents=True, exist_ok=True)
 
     return Settings(
@@ -32,6 +41,7 @@ def _build_settings(tmp_path: Path) -> Settings:
         data_gold=gold_dir,
         data_reference=reference_dir,
         reports_dir=reports_dir,
+        strategy_dir=strategy_dir,
     )
 
 
@@ -170,6 +180,20 @@ def _write_reporting_inputs(settings: Settings) -> None:
         ]
     ).to_parquet(settings.data_gold / "syntheticness_signals.parquet", index=False)
 
+    pd.DataFrame(
+        [
+            {
+                "severity": "error",
+                "category": "arithmetic_invariant",
+                "check_name": "implied_auv_k",
+                "message": "Taco Bell implied AUV differs materially from the recorded AUV.",
+                "brand_name": "Taco Bell",
+                "field_name": "average_unit_volume_usd_thousands",
+                "row_number": 2,
+            }
+        ]
+    ).to_parquet(settings.data_gold / "validation_flags.parquet", index=False)
+
     validation_dir = settings.reports_dir / "validation"
     validation_dir.mkdir(parents=True, exist_ok=True)
     (validation_dir / "validation_results.json").write_text(
@@ -255,6 +279,7 @@ def test_cli_report_writes_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("QSR_DATA_GOLD", str(settings.data_gold))
     monkeypatch.setenv("QSR_DATA_REFERENCE", str(settings.data_reference))
     monkeypatch.setenv("QSR_REPORTS_DIR", str(settings.reports_dir))
+    monkeypatch.setenv("QSR_STRATEGY_DIR", str(tmp_path / "strategy"))
 
     runner = CliRunner()
     result = runner.invoke(app, ["report", "--output", str(settings.reports_dir)])
@@ -265,3 +290,7 @@ def test_cli_report_writes_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert (settings.reports_dir / "index.html").exists()
     assert (settings.reports_dir / "index.json").exists()
     assert (settings.reports_dir / "brands" / "taco-bell.md").exists()
+    assert (settings.strategy_dir / "recommendations.parquet").exists()
+    assert (settings.strategy_dir / "recommendations.json").exists()
+    assert (settings.reports_dir / "strategy" / "strategy_playbook.md").exists()
+    assert (settings.reports_dir / "strategy" / "recommendations.json").exists()

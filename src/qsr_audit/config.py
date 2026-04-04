@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     data_reference: Path = Path("data/reference")
 
     reports_dir: Path = Path("reports")
+    strategy_dir: Path = Path("strategy")
 
     log_level: str = "INFO"
 
