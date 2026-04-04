@@ -1,260 +1,196 @@
+"""Tests for workbook ingestion and normalization."""
+
 from __future__ import annotations
 
-import filecmp
 from pathlib import Path
 
 import pandas as pd
 import pytest
-from openpyxl import Workbook
-from qsr_audit.ingest.workbook import load_workbook_sheets
-from qsr_audit.normalize.parsing import canonicalize_brand_name, parse_fte_range, parse_margin_range
 from typer.testing import CliRunner
 
 from qsr_audit.cli import app
-
-TOP30_SHEET = "QSR Top30 核心数据"
-STRATEGY_SHEET = "AI策略与落地效果"
-NOTES_SHEET = "数据说明与来源"
-
-TOP30_HEADERS = [
-    "排名",
-    "品牌",
-    "品类",
-    "美国门店数\n(2024)",
-    "全系统营收\n($B, 2024)",
-    "店均AUV\n($K)",
-    "店均日等效FTE\n(估算)",
-    "门店利润率\n(估算)",
-    "央厨/供应链模式",
-    "所有制模式",
-]
-
-STRATEGY_HEADERS = [
-    "品牌",
-    "AI/技术策略方向",
-    "关键举措",
-    "部署规模",
-    "落地效果/数据",
-    "当前状态(2026Q1)",
-]
-
-NOTES_HEADERS = ["字段", "说明"]
-
-
-def build_fixture_workbook(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = TOP30_SHEET
-    ws.append(TOP30_HEADERS)
-    ws.append(
-        [
-            1,
-            "  mcdonald's  ",
-            "汉堡",
-            19502,
-            53.5,
-            4001,
-            "25-35",
-            "18-20%",
-            "肉饼由区域供应商冷冻预成型；门店用烤炉+油炸锅完成",
-            "95%加盟",
-        ]
-    )
-    ws.append(
-        [
-            2,
-            "dunkin",
-            "咖啡/甜甜圈",
-            9509,
-            11.4,
-            1200,
-            "10-15",
-            "15-18%",
-            "甜甜圈由央厨或区域供应商预制冷冻→门店烘烤/装饰；饮品门店现场制作",
-            "100%加盟",
-        ]
-    )
-    ws.append(
-        [
-            3,
-            "in-n-out",
-            "汉堡",
-            410,
-            1.25,
-            3130,
-            "20-25",
-            "20-24%",
-            "自有加工厂→冷链直送；薯条门店从整颗土豆现切现炸",
-            "100%直营",
-        ]
-    )
-
-    ws = wb.create_sheet(STRATEGY_SHEET)
-    ws.append(STRATEGY_HEADERS)
-    ws.append(
-        [
-            "mcdonald's",
-            "语音AI点单→转向后台AI",
-            "①2021-2024与IBM测试Drive-thru AOT语音点单\n②与Google合作GenAI\n③预测性设备维护",
-            "AOT: 100家→已关停",
-            "AOT准确率不达标；Google合作转向后台运营优化。",
-            "AOT终止；聚焦后台AI",
-        ]
-    )
-    ws.append(
-        [
-            "DUNKIN",
-            "门店自动化 + 数字化",
-            "①数字菜单\n②忠诚度App\n③排班优化",
-            "有限",
-            "移动端订单增长。",
-            "追赶期",
-        ]
-    )
-    ws.append(
-        [
-            "In N Out",
-            "低技术、高流程",
-            "①极简菜单\n②强流程标准化",
-            "门店全系统",
-            "保持高AUV与高一致性。",
-            "保持低技术策略",
-        ]
-    )
-
-    ws = wb.create_sheet(NOTES_SHEET)
-    ws.append(NOTES_HEADERS)
-    ws.append(["美国门店数", "2024年底数据，来源QSR 50 2025 Report / 各品牌10-K年报 / Statista"])
-    ws.append(["全系统营收", "美国系统营收（含加盟商），2024年。"])
-    ws.append(["店均AUV", "Average Unit Volume，全系统美国平均值。"])
-    ws.append(
-        [
-            "店均日等效FTE",
-            "基于公开数据估算的每门店日均等效全职人数（8小时=1 FTE）。仅为估算区间。",
-        ]
-    )
-    ws.append(["门店利润率", "Restaurant-Level Operating Margin，不含总部费用/折旧/租金。"])
-    ws.append(["央厨/供应链模式", "描述食品从原料到成品的处理链路。"])
-    ws.append(["AI策略", "基于公开新闻报道、品牌官方公告、投资者电话会议、行业分析整理。"])
-    ws.append([None, None])
-    ws.append(["关键发现", None])
-    ws.append(
-        ["1", "AUV排名: Chick-fil-A > Raising Cane's > McDonald's > Shake Shack > Whataburger"]
-    )
-    ws.append(["2", "AI策略光谱: 全自动化 → 协作机器人 → 调度AI → AI语音 → 纯人工"])
-    ws.append(["3", "语音AI Drive-thru: McDonald's失败退出，Taco Bell遭挫重新评估。"])
-    ws.append(["4", "物理自动化: Sweetgreen 和 Chipotle 是推进厨房机器人的代表。"])
-    ws.append(["5", "反技术路线也能成功。"])
-    ws.append(["6", "门店现做程度与AUV高度正相关。"])
-    ws.append([None, None])
-    ws.append(["数据收集日期", "2026年4月3日"])
-    ws.append(
-        ["主要来源", "QSR Magazine QSR 50 (2025), Technomic Top 500, Restaurant Business, NRN"]
-    )
-    ws.append(["用途", "AtomBite.ai 竞争格局分析与投资者材料参考"])
-
-    wb.save(path)
-    return path
-
-
-@pytest.fixture()
-def fixture_workbook_path(tmp_path: Path) -> Path:
-    return build_fixture_workbook(tmp_path / "source" / "fixture_workbook.xlsx")
-
-
-def test_parse_fte_range_handles_ranges():
-    assert parse_fte_range("6-8") == (6, 8, 7.0)
-    assert parse_fte_range("20-25") == (20, 25, 22.5)
-
-
-def test_parse_margin_range_handles_percentage_ranges():
-    assert parse_margin_range("8-12%") == (8, 12, 10.0)
-    assert parse_margin_range("18-22%") == (18, 22, 20.0)
-
-
-@pytest.mark.parametrize(
-    ("raw_name", "expected"),
-    [
-        ("  mcdonald's  ", "McDonald's"),
-        ("dunkin", "Dunkin'"),
-        ("In N Out", "In-N-Out"),
-    ],
+from qsr_audit.config import Settings
+from qsr_audit.ingest import (
+    canonicalize_brand_name,
+    ingest_workbook,
+    load_workbook_sheets,
+    parse_fte_range,
+    parse_margin_range,
 )
-def test_brand_canonicalization(raw_name: str, expected: str):
-    assert canonicalize_brand_name(raw_name) == expected
 
 
-def test_sheet_load_reads_all_three_sheets(fixture_workbook_path: Path):
-    sheets = load_workbook_sheets(fixture_workbook_path)
+def _write_fixture_workbook(path: Path) -> None:
+    core_brand_metrics = pd.DataFrame(
+        [
+            {
+                "排名": 1,
+                "品牌": "McDonalds",
+                "品类": "汉堡",
+                "美国门店数\n(2024)": 13559,
+                "全系统营收\n($B, 2024)": 53.5,
+                "店均AUV\n($K)": 4001,
+                "店均日等效FTE\n(估算)": "25-35",
+                "门店利润率\n(估算)": "18-20%",
+                "央厨/供应链模式": "供应商冷冻预成型；门店完成烹饪",
+                "所有制模式": "95%加盟",
+            },
+            {
+                "排名": 2,
+                "品牌": "In N Out",
+                "品类": "汉堡",
+                "美国门店数\n(2024)": 410,
+                "全系统营收\n($B, 2024)": 1.25,
+                "店均AUV\n($K)": 3130,
+                "店均日等效FTE\n(估算)": "20-25",
+                "门店利润率\n(估算)": "20-24%",
+                "央厨/供应链模式": "门店现切现炸",
+                "所有制模式": "100%直营",
+            },
+        ]
+    )
+    ai_strategy_registry = pd.DataFrame(
+        [
+            {
+                "品牌": "McDonald's",
+                "AI/技术策略方向": "后台AI",
+                "关键举措": "测试后台AI工具",
+                "部署规模": "数千家",
+                "落地效果/数据": "会员频次提升",
+                "当前状态(2026Q1)": "推进中",
+            }
+        ]
+    )
+    data_notes = pd.DataFrame(
+        [
+            {"字段": "美国门店数", "说明": "2024年底美国门店数量"},
+            {"字段": "店均AUV", "说明": "AUV定义说明"},
+            {"字段": None, "说明": None},
+            {"字段": "关键发现", "说明": None},
+            {"字段": "1", "说明": "自动化与AUV正相关"},
+            {"字段": "2", "说明": "人力密度高的品牌也能胜出"},
+            {"字段": None, "说明": None},
+            {"字段": "数据收集日期", "说明": "2026年4月3日"},
+        ]
+    )
 
-    assert set(sheets) == {TOP30_SHEET, STRATEGY_SHEET, NOTES_SHEET}
-    assert list(sheets[TOP30_SHEET].columns) == TOP30_HEADERS
-    assert list(sheets[STRATEGY_SHEET].columns) == STRATEGY_HEADERS
-    assert list(sheets[NOTES_SHEET].columns) == NOTES_HEADERS
-    assert sheets[TOP30_SHEET].shape[0] == 3
-    assert sheets[STRATEGY_SHEET].shape[0] == 3
-    assert sheets[NOTES_SHEET].shape[0] == 19
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        core_brand_metrics.to_excel(writer, sheet_name="QSR Top30 核心数据", index=False)
+        ai_strategy_registry.to_excel(writer, sheet_name="AI策略与落地效果", index=False)
+        data_notes.to_excel(writer, sheet_name="数据说明与来源", index=False)
 
 
-def test_ingest_workbook_writes_bronze_and_silver_outputs(
-    fixture_workbook_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    runner = CliRunner()
-    monkeypatch.chdir(tmp_path)
+def test_parse_fte_range() -> None:
+    assert parse_fte_range("6-8") == (6.0, 8.0, 7.0)
+    assert parse_fte_range("20") == (20.0, 20.0, 20.0)
+    assert parse_fte_range(None) == (None, None, None)
 
-    raw_dir = tmp_path / "data" / "raw"
-    bronze_dir = tmp_path / "data" / "bronze"
-    silver_dir = tmp_path / "data" / "silver"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    bronze_dir.mkdir(parents=True, exist_ok=True)
-    silver_dir.mkdir(parents=True, exist_ok=True)
 
-    input_path = raw_dir / fixture_workbook_path.name
-    input_path.write_bytes(fixture_workbook_path.read_bytes())
+def test_parse_margin_range() -> None:
+    assert parse_margin_range("8-12%") == (8.0, 12.0, 10.0)
+    assert parse_margin_range("15%") == (15.0, 15.0, 15.0)
+    assert parse_margin_range("n/a") == (None, None, None)
 
-    result = runner.invoke(app, ["ingest-workbook", "--input", str(input_path)])
-    assert result.exit_code == 0, result.output
 
-    copied_workbooks = [
-        path for path in bronze_dir.rglob("*.xlsx") if filecmp.cmp(path, input_path, shallow=False)
+def test_load_workbook_sheets(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "fixture.xlsx"
+    _write_fixture_workbook(workbook_path)
+
+    sheets = load_workbook_sheets(workbook_path)
+
+    assert set(sheets) == {"QSR Top30 核心数据", "AI策略与落地效果", "数据说明与来源"}
+    assert list(sheets["QSR Top30 核心数据"].columns) == [
+        "排名",
+        "品牌",
+        "品类",
+        "美国门店数\n(2024)",
+        "全系统营收\n($B, 2024)",
+        "店均AUV\n($K)",
+        "店均日等效FTE\n(估算)",
+        "门店利润率\n(估算)",
+        "央厨/供应链模式",
+        "所有制模式",
     ]
-    assert copied_workbooks, "expected the raw workbook copy to be preserved in bronze"
+    assert len(sheets["QSR Top30 核心数据"]) == 2
+    assert len(sheets["AI策略与落地效果"]) == 1
+    assert len(sheets["数据说明与来源"]) == 8
 
-    assert len(list(bronze_dir.rglob("*.parquet"))) >= 3
-    assert len(list(bronze_dir.rglob("*.csv"))) >= 3
 
-    expected_silver_files = {
-        "core_brand_metrics.parquet",
-        "ai_strategy_registry.parquet",
-        "data_notes.parquet",
-        "key_findings.parquet",
-    }
-    assert expected_silver_files <= {path.name for path in silver_dir.glob("*.parquet")}
+def test_canonicalize_brand_name() -> None:
+    assert canonicalize_brand_name("McDonalds") == "McDonald's"
+    assert canonicalize_brand_name("In N Out") == "In-N-Out"
+    assert canonicalize_brand_name("  burger king ") == "Burger King"
 
-    core = pd.read_parquet(silver_dir / "core_brand_metrics.parquet")
-    strategy = pd.read_parquet(silver_dir / "ai_strategy_registry.parquet")
-    notes = pd.read_parquet(silver_dir / "data_notes.parquet")
-    findings = pd.read_parquet(silver_dir / "key_findings.parquet")
 
-    assert core["brand_name"].tolist() == ["McDonald's", "Dunkin'", "In-N-Out"]
-    assert core["fte_min"].tolist() == [25, 10, 20]
-    assert core["fte_max"].tolist() == [35, 15, 25]
-    assert core["fte_mid"].tolist() == [30.0, 12.5, 22.5]
-    assert core["margin_min_pct"].tolist() == [18, 15, 20]
-    assert core["margin_max_pct"].tolist() == [20, 18, 24]
-    assert core["margin_mid_pct"].tolist() == [19.0, 16.5, 22.0]
-    assert core["source_sheet"].tolist() == [TOP30_SHEET, TOP30_SHEET, TOP30_SHEET]
-    assert core["row_number"].tolist() == [2, 3, 4]
+def test_ingest_workbook_writes_expected_outputs(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    bronze_dir = tmp_path / "bronze"
+    silver_dir = tmp_path / "silver"
+    gold_dir = tmp_path / "gold"
+    reference_dir = tmp_path / "reference"
+    reports_dir = tmp_path / "reports"
+    for directory in [raw_dir, bronze_dir, silver_dir, gold_dir, reference_dir, reports_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
 
-    assert strategy["brand_name"].tolist() == ["McDonald's", "Dunkin'", "In-N-Out"]
-    assert strategy["source_sheet"].tolist() == [STRATEGY_SHEET, STRATEGY_SHEET, STRATEGY_SHEET]
-    assert strategy["row_number"].tolist() == [2, 3, 4]
-    assert any("\n" in text for text in strategy["key_initiatives"].tolist())
+    workbook_path = raw_dir / "fixture.xlsx"
+    _write_fixture_workbook(workbook_path)
 
-    assert notes["source_sheet"].tolist() == [NOTES_SHEET] * 7
-    assert notes["row_number"].tolist() == [2, 3, 4, 5, 6, 7, 8]
+    settings = Settings(
+        data_raw=raw_dir,
+        data_bronze=bronze_dir,
+        data_silver=silver_dir,
+        data_gold=gold_dir,
+        data_reference=reference_dir,
+        reports_dir=reports_dir,
+    )
 
-    assert findings["source_sheet"].tolist() == [NOTES_SHEET] * 6
-    assert findings["row_number"].tolist() == [11, 12, 13, 14, 15, 16]
+    result = ingest_workbook(workbook_path, settings)
+
+    assert result.workbook_copy_path.exists()
+    assert (bronze_dir / "qsr_top30_core_data_raw.parquet").exists()
+    assert (bronze_dir / "qsr_top30_core_data_raw.csv").exists()
+    assert (bronze_dir / "ai_strategy_implementation_raw.parquet").exists()
+    assert (bronze_dir / "data_notes_and_sources_raw.csv").exists()
+    assert result.silver_artifacts.core_brand_metrics_path.exists()
+    assert result.silver_artifacts.ai_strategy_registry_path.exists()
+    assert result.silver_artifacts.data_notes_path.exists()
+    assert result.silver_artifacts.key_findings_path.exists()
+
+    core_metrics = pd.read_parquet(result.silver_artifacts.core_brand_metrics_path)
+    assert core_metrics["brand_name"].tolist() == ["McDonald's", "In-N-Out"]
+    assert core_metrics["fte_min"].tolist() == [25.0, 20.0]
+    assert core_metrics["source_sheet"].tolist() == ["QSR Top30 核心数据", "QSR Top30 核心数据"]
+    assert core_metrics["row_number"].tolist() == [2, 3]
+
+    findings = pd.read_parquet(result.silver_artifacts.key_findings_path)
+    assert findings["finding_number"].tolist() == [1, 2]
+    assert findings["finding_text"].tolist() == ["自动化与AUV正相关", "人力密度高的品牌也能胜出"]
+
+
+def test_cli_ingest_workbook_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_dir = tmp_path / "raw"
+    bronze_dir = tmp_path / "bronze"
+    silver_dir = tmp_path / "silver"
+    gold_dir = tmp_path / "gold"
+    reference_dir = tmp_path / "reference"
+    reports_dir = tmp_path / "reports"
+    for directory in [raw_dir, bronze_dir, silver_dir, gold_dir, reference_dir, reports_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
+
+    workbook_path = raw_dir / "fixture.xlsx"
+    _write_fixture_workbook(workbook_path)
+
+    monkeypatch.setenv("QSR_DATA_RAW", str(raw_dir))
+    monkeypatch.setenv("QSR_DATA_BRONZE", str(bronze_dir))
+    monkeypatch.setenv("QSR_DATA_SILVER", str(silver_dir))
+    monkeypatch.setenv("QSR_DATA_GOLD", str(gold_dir))
+    monkeypatch.setenv("QSR_DATA_REFERENCE", str(reference_dir))
+    monkeypatch.setenv("QSR_REPORTS_DIR", str(reports_dir))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["ingest-workbook", "--input", str(workbook_path)])
+
+    assert result.exit_code == 0
+    assert (silver_dir / "core_brand_metrics.parquet").exists()
+    assert (silver_dir / "ai_strategy_registry.parquet").exists()
+    assert (silver_dir / "data_notes.parquet").exists()
+    assert (silver_dir / "key_findings.parquet").exists()
