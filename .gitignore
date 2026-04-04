@@ -21,8 +21,9 @@ build/
 .env
 .env.*
 
-# Data layers (keep .gitkeep)
+# Data layers and local reference data (keep .gitkeep)
 data/raw/*
+data/reference/*
 data/bronze/*
 data/silver/*
 data/gold/*
@@ -33,6 +34,5 @@ mlruns/
 mlflow.db
 
 # Reports
-reports/*.html
-reports/*.pdf
-reports/*.xlsx
+reports/*
+!reports/.gitkeep
