@@ -46,6 +46,16 @@
   - `data/gold/reference_coverage.parquet`
   - `reports/reference/reference_coverage.md`
 
+### `qsr-audit gate-gold`
+
+- Purpose: apply the explicit Gold publishing policy to reconciled Gold artifacts and decide which KPI rows are publishable, advisory, or blocked.
+- Primary outputs:
+  - `data/gold/gold_publish_decisions.parquet`
+  - `data/gold/publishable_kpis.parquet`
+  - `data/gold/blocked_kpis.parquet`
+  - `reports/audit/gold_publish_scorecard.md`
+  - `reports/audit/gold_publish_scorecard.json`
+
 ### `qsr-audit report --output reports/`
 
 - Purpose: build analyst-facing scorecards and downstream Gold-only strategy outputs.
@@ -66,6 +76,7 @@ qsr-audit ingest-workbook --input data/raw/source_workbook.xlsx
 qsr-audit validate-workbook --input data/silver --tolerance-auv 0.05
 qsr-audit run-syntheticness --input data/silver/core_brand_metrics.parquet
 qsr-audit reconcile --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
+qsr-audit gate-gold
 qsr-audit report --output reports/
 ```
 
@@ -73,4 +84,5 @@ qsr-audit report --output reports/
 
 - The legacy `ingest` and `validate` commands are placeholders. Use `ingest-workbook` and `validate-workbook`.
 - Reference CSVs are manual-first templates. Leave unknowns blank, preserve provenance fields, mark values as `reported` or `estimated`, and do not infer missing data.
+- `gate-gold` is the export decision layer. Advisory rows are not publishable, and blocked rows should be treated as unsafe for external use.
 - Strategy is downstream-only. It must consume Gold outputs and must not redefine business truth on its own.

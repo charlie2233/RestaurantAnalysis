@@ -150,6 +150,31 @@ Source-level provenance registry for reconciled core rows.
 | `notes` | Free-text notes |
 | `extra` | JSON metadata such as canonical brand name and lineage |
 
+### `data/gold/gold_publish_decisions.parquet`
+
+Metric-level Gold export decisions after policy evaluation.
+
+| Field | Meaning |
+|---|---|
+| `brand_name`, `canonical_brand_name` | Workbook and canonical brand identifiers |
+| `metric_name`, `metric_value` | Evaluated KPI name and Gold-layer value |
+| `publish_status` | `publishable`, `advisory`, or `blocked` |
+| `blocking_reasons`, `warning_reasons` | JSON arrays explaining the decision |
+| `source_type`, `source_name`, `source_url_or_doc_id`, `as_of_date` | Best available provenance attached to the decision row |
+| `method_reported_or_estimated`, `confidence_score` | Method and confidence for the attached provenance row |
+| `validation_references` | JSON list of structured validation findings that affected the decision |
+| `reconciliation_grade`, `reconciliation_relative_error`, `reconciliation_absolute_error` | Field-level reconciliation evidence when available |
+| `reference_evidence_present`, `reference_source_count` | Whether external reference evidence exists for the metric |
+| `policy_id`, `policy_version` | Versioned Gold gate policy identifiers |
+
+### `data/gold/publishable_kpis.parquet`
+
+Subset of `gold_publish_decisions.parquet` where `publish_status == publishable`.
+
+### `data/gold/blocked_kpis.parquet`
+
+Subset of `gold_publish_decisions.parquet` where `publish_status == blocked`.
+
 ## Report and strategy outputs
 
 ### `reports/index.json`
@@ -176,3 +201,11 @@ Rules-based strategy recommendations derived from Gold artifacts only.
 | `reference_source_count`, `overall_credibility_grade` | Reconciliation quality context |
 | `weakest_provenance_fields`, `largest_reconciliation_errors`, `open_issues` | Analyst debugging fields |
 | `plain_english_caveat`, `no_roi_claim` | Interpretation guardrails |
+
+### `reports/audit/gold_publish_scorecard.md`
+
+Analyst-facing Gold publishing scorecard summarizing publishable, advisory, and blocked KPI rows plus workbook-specific highlights such as orphan AI rows or AUV mismatch brands.
+
+### `reports/audit/gold_publish_scorecard.json`
+
+Machine-readable summary of the Gold publishing scorecard for downstream dashboards or QA tooling.

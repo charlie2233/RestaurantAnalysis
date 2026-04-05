@@ -21,6 +21,7 @@ from typer.testing import CliRunner
                 "run-syntheticness",
                 "reconcile",
                 "audit-reference",
+                "gate-gold",
                 "report",
             ],
         ),
@@ -51,6 +52,14 @@ from typer.testing import CliRunner
         (
             ["report", "--help"],
             ["Markdown/HTML/JSON audit reports", "Gold-derived strategy outputs"],
+        ),
+        (
+            ["gate-gold", "--help"],
+            [
+                "Gold publishing gates",
+                "KPI export decisions",
+                "audit scorecard",
+            ],
         ),
         (
             ["ingest", "--help"],
