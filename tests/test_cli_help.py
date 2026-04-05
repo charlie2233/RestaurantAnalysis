@@ -26,11 +26,11 @@ from typer.testing import CliRunner
         ),
         (
             ["ingest-workbook", "--help"],
-            ["Bronze and Silver artifacts", "--input"],
+            ["Bronze and Silver artifacts", "source workbook", "raw/Bronze workflow"],
         ),
         (
             ["validate-workbook", "--help"],
-            ["Silver directory", "--tolerance-auv"],
+            ["Silver directory", "Silver parquet file", "implied AUV"],
         ),
         (
             ["run-syntheticness", "--help"],
@@ -38,15 +38,19 @@ from typer.testing import CliRunner
         ),
         (
             ["reconcile", "--help"],
-            ["manual reference", "reference coverage", "--reference-dir"],
+            ["manual reference", "reference coverage", "CSV files and templates"],
         ),
         (
             ["audit-reference", "--help"],
-            ["manual reference coverage", "--core", "--reference-dir"],
+            [
+                "manual reference coverage",
+                "core_brand_metrics parquet file",
+                "CSV files and templates",
+            ],
         ),
         (
             ["report", "--help"],
-            ["Markdown/HTML/JSON audit reports", "--output"],
+            ["Markdown/HTML/JSON audit reports", "Gold-derived strategy outputs"],
         ),
         (
             ["ingest", "--help"],
