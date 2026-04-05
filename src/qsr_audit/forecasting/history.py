@@ -62,11 +62,7 @@ def snapshot_gold_history(
     decisions_path = resolved_gold_dir / "gold_publish_decisions.parquet"
     publishable_path = resolved_gold_dir / "publishable_kpis.parquet"
     if not decisions_path.exists() or not publishable_path.exists():
-        missing = [
-            str(path)
-            for path in (decisions_path, publishable_path)
-            if not path.exists()
-        ]
+        missing = [str(path) for path in (decisions_path, publishable_path) if not path.exists()]
         raise FileNotFoundError(
             "Gold snapshot history requires existing Gold gate artifacts. Missing: "
             + ", ".join(missing)
@@ -101,14 +97,22 @@ def snapshot_gold_history(
         "snapshot_created_at_utc": datetime.now(UTC).isoformat(),
         "included_statuses": ["publishable", "advisory"] if include_advisory else ["publishable"],
         "row_count": int(len(snapshot_rows)),
-        "brand_count": int(snapshot_rows["canonical_brand_name"].nunique()) if not snapshot_rows.empty else 0,
-        "metric_count": int(snapshot_rows["metric_name"].nunique()) if not snapshot_rows.empty else 0,
+        "brand_count": int(snapshot_rows["canonical_brand_name"].nunique())
+        if not snapshot_rows.empty
+        else 0,
+        "metric_count": int(snapshot_rows["metric_name"].nunique())
+        if not snapshot_rows.empty
+        else 0,
         "snapshot_rows_path": SNAPSHOT_ROWS_FILE,
         "gold_publish_decisions_path": DECISIONS_ARCHIVE_FILE,
         "publishable_kpis_path": PUBLISHABLE_ARCHIVE_FILE,
     }
-    manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    _write_snapshot_index(index_path=index_path, history_dir=resolved_history_dir, manifest=manifest_payload)
+    manifest_path.write_text(
+        json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    _write_snapshot_index(
+        index_path=index_path, history_dir=resolved_history_dir, manifest=manifest_payload
+    )
 
     return GoldSnapshotRun(
         as_of_date=snapshot_date.isoformat(),
@@ -155,7 +159,9 @@ def _build_snapshot_rows(
 
     selected = selected.loc[selected["publish_status"] != "blocked"].copy()
     selected["as_of_date"] = as_of_date
-    selected["snapshot_scope"] = "publishable_and_advisory" if include_advisory else "publishable_only"
+    selected["snapshot_scope"] = (
+        "publishable_and_advisory" if include_advisory else "publishable_only"
+    )
     selected["snapshot_created_at_utc"] = datetime.now(UTC).isoformat()
 
     coverage_path = gold_dir / "reference_coverage.parquet"

@@ -189,7 +189,15 @@ def render_forecast_baseline_summary(summary: dict[str, Any]) -> str:
     for tier, count in summary.get("confidence_coverage_by_tier", {}).items():
         lines.append(f"- `{tier}`: {count} row(s)")
 
-    lines.extend(["", "## Baseline Results", "", "| Baseline | Status | MASE | WAPE | sMAPE | RMSE | Bias |", "| --- | --- | ---: | ---: | ---: | ---: | ---: |"])
+    lines.extend(
+        [
+            "",
+            "## Baseline Results",
+            "",
+            "| Baseline | Status | MASE | WAPE | sMAPE | RMSE | Bias |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
     for row in summary.get("baseline_results", []):
         mase = _format_metric(row.get("mase"))
         wape = _format_metric(row.get("wape"))
@@ -200,11 +208,15 @@ def render_forecast_baseline_summary(summary: dict[str, Any]) -> str:
             f"| {row['baseline_name']} | {row['status']} | {mase} | {wape} | {smape} | {rmse} | {bias} |"
         )
 
-    skipped_notes = [row for row in summary.get("baseline_results", []) if row.get("status") != "ok"]
+    skipped_notes = [
+        row for row in summary.get("baseline_results", []) if row.get("status") != "ok"
+    ]
     if skipped_notes:
         lines.extend(["", "## Skipped Or Partial Baselines", ""])
         for row in skipped_notes:
-            lines.append(f"- `{row['baseline_name']}`: {row.get('status_reason') or 'not available'}")
+            lines.append(
+                f"- `{row['baseline_name']}`: {row.get('status_reason') or 'not available'}"
+            )
 
     return "\n".join(lines) + "\n"
 
@@ -267,14 +279,18 @@ def _evaluate_baselines(
                 {
                     **common,
                     "baseline_name": "exp_smoothing_alpha_0_5",
-                    "prediction": float(_exp_smoothing_forecast(history_values, alpha=smoothing_alpha)),
+                    "prediction": float(
+                        _exp_smoothing_forecast(history_values, alpha=smoothing_alpha)
+                    ),
                 }
             )
 
             if season_length is None:
                 baseline_skip_reasons["seasonal_naive"].append("no season_length provided")
             elif season_length <= 1:
-                baseline_skip_reasons["seasonal_naive"].append("season_length must be greater than 1")
+                baseline_skip_reasons["seasonal_naive"].append(
+                    "season_length must be greater than 1"
+                )
             elif not regular_cadence:
                 baseline_skip_reasons["seasonal_naive"].append(
                     f"`{brand_name}` does not have regular snapshot cadence"
@@ -316,7 +332,8 @@ def _evaluate_baselines(
                 {
                     "baseline_name": baseline_name,
                     "status": "skipped",
-                    "status_reason": reason or "baseline could not be evaluated on the current panel",
+                    "status_reason": reason
+                    or "baseline could not be evaluated on the current panel",
                     "observation_count": 0,
                     "mase": None,
                     "wape": None,
@@ -347,9 +364,7 @@ def _evaluate_baselines(
                         )
                     )
                 ),
-                "rmse": _round_metric(
-                    math.sqrt(float(baseline_frame["squared_error"].mean()))
-                ),
+                "rmse": _round_metric(math.sqrt(float(baseline_frame["squared_error"].mean()))),
                 "bias": _round_metric(float(baseline_frame["error"].mean())),
             }
         )
@@ -369,7 +384,9 @@ def _build_baseline_summary(
     return {
         "metric_name": panel_summary["metric_name"],
         "period_count": panel_summary["period_count"],
-        "brand_count": int(forecasts["canonical_brand_name"].nunique()) if not forecasts.empty else 0,
+        "brand_count": int(forecasts["canonical_brand_name"].nunique())
+        if not forecasts.empty
+        else 0,
         "test_row_count": int(len(split.test)),
         "holdout_periods": split.holdout_periods,
         "min_train_periods": split.min_train_periods,

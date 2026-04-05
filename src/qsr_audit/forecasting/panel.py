@@ -66,7 +66,9 @@ def build_forecast_panel(
     dropped_reasons: Counter[str] = Counter()
     frames: list[pd.DataFrame] = []
 
-    for manifest_row in index_frame.sort_values("as_of_date", kind="stable").to_dict(orient="records"):
+    for manifest_row in index_frame.sort_values("as_of_date", kind="stable").to_dict(
+        orient="records"
+    ):
         snapshot_path = resolved_history_dir / str(manifest_row["snapshot_rows_path"])
         if not snapshot_path.exists():
             dropped_reasons["missing_snapshot_file"] += 1
@@ -84,7 +86,9 @@ def build_forecast_panel(
         status_excluded = metric_frame.loc[~metric_frame["publish_status"].isin(allowed_statuses)]
         if not status_excluded.empty:
             dropped_reasons["status_excluded"] += int(len(status_excluded))
-        metric_frame = metric_frame.loc[metric_frame["publish_status"].isin(allowed_statuses)].copy()
+        metric_frame = metric_frame.loc[
+            metric_frame["publish_status"].isin(allowed_statuses)
+        ].copy()
 
         missing_values = metric_frame["metric_value"].isna()
         if missing_values.any():
@@ -122,7 +126,9 @@ def build_forecast_panel(
         )
 
     panel = pd.concat(frames, ignore_index=True)
-    duplicates = panel.duplicated(subset=["as_of_date", "canonical_brand_name", "metric_name"], keep="last")
+    duplicates = panel.duplicated(
+        subset=["as_of_date", "canonical_brand_name", "metric_name"], keep="last"
+    )
     if duplicates.any():
         dropped_reasons["duplicate_brand_period"] += int(duplicates.sum())
         panel = panel.loc[~duplicates].copy()
@@ -154,11 +160,17 @@ def build_forecast_panel(
         "dropped_rows_by_reason": dict(sorted(dropped_reasons.items())),
         "publish_status_counts": {
             str(key): int(value)
-            for key, value in panel["publish_status"].value_counts(dropna=False).sort_index().items()
+            for key, value in panel["publish_status"]
+            .value_counts(dropna=False)
+            .sort_index()
+            .items()
         },
         "confidence_coverage_by_tier": {
             str(key): int(value)
-            for key, value in panel["confidence_tier"].value_counts(dropna=False).sort_index().items()
+            for key, value in panel["confidence_tier"]
+            .value_counts(dropna=False)
+            .sort_index()
+            .items()
         },
     }
 
@@ -255,7 +267,10 @@ def _resolve_experiment_output_root(
         else settings.artifacts_dir / "forecasting" / _slugify_metric_name(metric_name)
     )
     resolved = resolved.expanduser().resolve()
-    for forbidden_root in (settings.reports_dir.expanduser().resolve(), settings.strategy_dir.expanduser().resolve()):
+    for forbidden_root in (
+        settings.reports_dir.expanduser().resolve(),
+        settings.strategy_dir.expanduser().resolve(),
+    ):
         if _is_relative_to(resolved, forbidden_root):
             raise ValueError(
                 f"Forecast experiment artifacts must not be written under analyst-facing paths like {forbidden_root}."

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-
 from qsr_audit.forecasting import (
     build_forecast_panel,
     build_time_split,
@@ -15,6 +14,7 @@ from qsr_audit.forecasting import (
     prepare_chronos_experiment,
     snapshot_gold_history,
 )
+
 from tests.helpers import build_settings
 
 
@@ -214,7 +214,12 @@ def test_time_split_helper_prevents_future_leakage() -> None:
                 "Taco Bell": [20.0, 21.0, 22.0, 23.0],
             }.items()
             for value, metric_value in zip(
-                [pd.Timestamp("2025-01-31").date(), pd.Timestamp("2025-02-28").date(), pd.Timestamp("2025-03-31").date(), pd.Timestamp("2025-04-30").date()],
+                [
+                    pd.Timestamp("2025-01-31").date(),
+                    pd.Timestamp("2025-02-28").date(),
+                    pd.Timestamp("2025-03-31").date(),
+                    pd.Timestamp("2025-04-30").date(),
+                ],
                 series,
                 strict=False,
             )
@@ -266,9 +271,21 @@ def test_prepare_chronos_experiment_is_opt_in_and_ci_guarded(
     panel_path = tmp_path / "panel.parquet"
     pd.DataFrame(
         [
-            {"as_of_date": "2025-01-31", "canonical_brand_name": "McDonald's", "metric_value": 10.0},
-            {"as_of_date": "2025-02-28", "canonical_brand_name": "McDonald's", "metric_value": 12.0},
-            {"as_of_date": "2025-03-31", "canonical_brand_name": "McDonald's", "metric_value": 14.0},
+            {
+                "as_of_date": "2025-01-31",
+                "canonical_brand_name": "McDonald's",
+                "metric_value": 10.0,
+            },
+            {
+                "as_of_date": "2025-02-28",
+                "canonical_brand_name": "McDonald's",
+                "metric_value": 12.0,
+            },
+            {
+                "as_of_date": "2025-03-31",
+                "canonical_brand_name": "McDonald's",
+                "metric_value": 14.0,
+            },
         ]
     ).to_parquet(panel_path, index=False)
 
