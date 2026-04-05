@@ -20,13 +20,17 @@ def _write_gate_inputs(
     include_auv_mismatch: bool = True,
     include_orphan_ai_brand: bool = False,
     missing_mcd_provenance: bool = False,
+    mcd_brand_name: str = "McDonald's",
+    include_synthetic_signal: bool = True,
+    synthetic_brand_name: str = "Taco Bell",
+    missing_ai_brands: list[str] | None = None,
 ) -> tuple[Path, object]:
     settings = build_settings(tmp_path)
 
     reconciled = pd.DataFrame(
         [
             {
-                "brand_name": "McDonald's",
+                "brand_name": mcd_brand_name,
                 "canonical_brand_name": "McDonald's",
                 "rank": 1,
                 "us_store_count_2024": 13559,
@@ -191,6 +195,26 @@ def _write_gate_inputs(
                 "details": json.dumps({"extra_ai_brands": ["Sweetgreen"]}),
             }
         )
+    if missing_ai_brands:
+        validation_rows.append(
+            {
+                "severity": "warning",
+                "category": "cross_sheet",
+                "check_name": "brand_alignment.missing_ai_brands",
+                "dataset": "core_brand_metrics",
+                "message": (
+                    "Core brands are missing corresponding AI strategy rows: "
+                    + ", ".join(missing_ai_brands)
+                ),
+                "sheet_name": "AI策略与落地效果",
+                "field_name": None,
+                "brand_name": None,
+                "row_number": None,
+                "expected": None,
+                "observed": None,
+                "details": json.dumps({"missing_ai_brands": missing_ai_brands}),
+            }
+        )
     pd.DataFrame(validation_rows).to_parquet(
         settings.data_gold / "validation_flags.parquet",
         index=False,
@@ -275,12 +299,15 @@ def _write_gate_inputs(
         index=False,
     )
 
-    pd.DataFrame(
-        [
+    synthetic_rows: list[dict[str, object]] = []
+    if include_synthetic_signal:
+        synthetic_rows.append(
             {
                 "signal_type": "outlier",
-                "title": "Taco Bell AUV is a mild outlier",
-                "plain_english": "Taco Bell AUV deserves analyst review before publication.",
+                "title": f"{synthetic_brand_name} AUV is a mild outlier",
+                "plain_english": (
+                    f"{synthetic_brand_name} AUV deserves analyst review before publication."
+                ),
                 "strength": "moderate",
                 "dataset": "core_brand_metrics",
                 "field_name": "average_unit_volume_usd_thousands",
@@ -295,10 +322,13 @@ def _write_gate_inputs(
                 "expected": None,
                 "interpretation": "Analyst review recommended.",
                 "caveat": "Tiny sample.",
-                "details": json.dumps({"brand_name": "Taco Bell"}),
+                "details": json.dumps({"brand_name": synthetic_brand_name}),
             }
-        ]
-    ).to_parquet(settings.data_gold / "syntheticness_signals.parquet", index=False)
+        )
+    pd.DataFrame(synthetic_rows).to_parquet(
+        settings.data_gold / "syntheticness_signals.parquet",
+        index=False,
+    )
 
     return settings.data_gold, settings
 
@@ -375,6 +405,70 @@ def test_gate_gold_keeps_estimated_operational_metrics_advisory(tmp_path: Path) 
         operational_rows["warning_reasons"]
         .map(lambda reasons: any("advisory-only" in reason for reason in reasons))
         .all()
+    )
+
+
+def test_gate_gold_keeps_synthetic_warning_when_brand_uses_raw_alias(tmp_path: Path) -> None:
+    _, settings = _write_gate_inputs(
+        tmp_path,
+        include_auv_mismatch=False,
+        mcd_brand_name="McDonalds",
+        synthetic_brand_name="McDonalds",
+    )
+
+    run = gate_gold_publish(settings=settings)
+
+    decision = run.decisions.loc[
+        (run.decisions["canonical_brand_name"] == "McDonald's")
+        & (run.decisions["metric_name"] == "auv")
+    ].iloc[0]
+    assert decision["publish_status"] == "advisory"
+    assert any(
+        "analyst review before publication" in reason for reason in decision["warning_reasons"]
+    )
+
+
+def test_gate_gold_keeps_synthetic_warning_when_brand_already_canonical(
+    tmp_path: Path,
+) -> None:
+    _, settings = _write_gate_inputs(
+        tmp_path,
+        include_auv_mismatch=False,
+        mcd_brand_name="McDonalds",
+        synthetic_brand_name="McDonald's",
+    )
+
+    run = gate_gold_publish(settings=settings)
+
+    decision = run.decisions.loc[
+        (run.decisions["canonical_brand_name"] == "McDonald's")
+        & (run.decisions["metric_name"] == "auv")
+    ].iloc[0]
+    assert decision["publish_status"] == "advisory"
+    assert any(
+        "analyst review before publication" in reason for reason in decision["warning_reasons"]
+    )
+
+
+def test_gate_gold_matches_missing_ai_warning_from_raw_alias(tmp_path: Path) -> None:
+    _, settings = _write_gate_inputs(
+        tmp_path,
+        include_auv_mismatch=False,
+        include_synthetic_signal=False,
+        mcd_brand_name="McDonalds",
+        missing_ai_brands=["McDonalds"],
+    )
+
+    run = gate_gold_publish(settings=settings)
+
+    decision = run.decisions.loc[
+        (run.decisions["canonical_brand_name"] == "McDonald's")
+        & (run.decisions["metric_name"] == "store_count")
+    ].iloc[0]
+    assert decision["publish_status"] == "advisory"
+    assert any(
+        "AI strategy sheet is missing a corresponding row" in reason
+        for reason in decision["warning_reasons"]
     )
 
 

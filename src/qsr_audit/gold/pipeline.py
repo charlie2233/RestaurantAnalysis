@@ -13,6 +13,7 @@ import pandas as pd
 from qsr_audit.config import Settings
 from qsr_audit.gold.policy import GOLD_PUBLISH_POLICY_V1, GoldPublishPolicy, MetricGatePolicy
 from qsr_audit.gold.reporting import build_gold_publish_summary, render_gold_publish_scorecard
+from qsr_audit.reconcile.entity_resolution import resolve_brand_name
 
 FIELD_NAME_TO_POLICY_METRIC = {
     "rank": "rank",
@@ -156,13 +157,15 @@ def build_gold_publish_decisions(
 
     decision_rows: list[dict[str, Any]] = []
     policy_map = policy.metric_policy_map()
+    candidate_brands = _known_brand_candidates(inputs.reconciled_core_metrics)
     provenance_by_brand = _provenance_by_brand(inputs.provenance_registry)
     validation_by_brand, missing_ai_brands, _extra_ai_brands, _auv_mismatch_brands = (
-        _validation_context(inputs.validation_flags)
+        _validation_context(inputs.validation_flags, candidate_brands=candidate_brands)
     )
     brand_coverage = _brand_reference_coverage(inputs.reference_coverage)
     synthetic_by_brand_metric = _syntheticness_by_brand_metric(
         inputs.syntheticness_signals,
+        candidate_brands=candidate_brands,
         warning_strengths=policy.synthetic_warning_strengths,
     )
 
@@ -235,8 +238,9 @@ def build_gold_gate_summary(
 ) -> dict[str, Any]:
     """Build the Gold publishing scorecard summary."""
 
+    candidate_brands = _known_brand_candidates(inputs.reconciled_core_metrics)
     _validation_by_brand, _missing_ai_brands, extra_ai_brands, auv_mismatch_brands = (
-        _validation_context(inputs.validation_flags)
+        _validation_context(inputs.validation_flags, candidate_brands=candidate_brands)
     )
     advisory_only_metrics = [
         metric_policy.metric_name
@@ -487,6 +491,8 @@ def _provenance_by_brand(provenance_frame: pd.DataFrame) -> dict[str, list[dict[
 
 def _validation_context(
     validation_flags: pd.DataFrame,
+    *,
+    candidate_brands: set[str],
 ) -> tuple[dict[str, list[dict[str, Any]]], set[str], list[str], list[str]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     missing_ai_brands: set[str] = set()
@@ -499,20 +505,32 @@ def _validation_context(
     for row in validation_flags.to_dict(orient="records"):
         brand_name = _clean_optional_text(row.get("brand_name"))
         if brand_name is not None:
-            grouped[brand_name].append(row)
+            grouped[
+                _canonical_brand_lookup_key(brand_name, candidate_brands=candidate_brands)
+            ].append(row)
 
         check_name = str(row.get("check_name") or "")
         details = row.get("details") or {}
         if check_name == "brand_alignment.missing_ai_brands":
-            missing_ai_brands.update(str(value) for value in details.get("missing_ai_brands", []))
+            missing_ai_brands.update(
+                _canonical_brand_lookup_key(value, candidate_brands=candidate_brands)
+                for value in details.get("missing_ai_brands", [])
+                if _clean_optional_text(value) is not None
+            )
         if check_name == "brand_alignment.extra_ai_brands":
-            extra_ai_brands.update(str(value) for value in details.get("extra_ai_brands", []))
+            extra_ai_brands.update(
+                _canonical_brand_lookup_key(value, candidate_brands=candidate_brands)
+                for value in details.get("extra_ai_brands", [])
+                if _clean_optional_text(value) is not None
+            )
         if (
             check_name == "implied_auv_k"
             and row.get("severity") == "error"
             and brand_name is not None
         ):
-            auv_mismatch_brands.add(brand_name)
+            auv_mismatch_brands.add(
+                _canonical_brand_lookup_key(brand_name, candidate_brands=candidate_brands)
+            )
 
     return grouped, missing_ai_brands, sorted(extra_ai_brands), sorted(auv_mismatch_brands)
 
@@ -533,6 +551,7 @@ def _brand_reference_coverage(reference_coverage: pd.DataFrame) -> dict[str, dic
 def _syntheticness_by_brand_metric(
     syntheticness_signals: pd.DataFrame,
     *,
+    candidate_brands: set[str],
     warning_strengths: tuple[str, ...],
 ) -> dict[tuple[str, str], list[str]]:
     grouped: dict[tuple[str, str], list[str]] = defaultdict(list)
@@ -543,7 +562,10 @@ def _syntheticness_by_brand_metric(
         if str(row.get("strength") or "") not in warning_strengths:
             continue
         details = row.get("details") or {}
-        brand_name = _clean_optional_text(details.get("brand_name"))
+        brand_name = _canonical_brand_lookup_key(
+            details.get("canonical_brand_name") or details.get("brand_name"),
+            candidate_brands=candidate_brands,
+        )
         metric_name = FIELD_NAME_TO_POLICY_METRIC.get(str(row.get("field_name") or ""))
         if brand_name is None or metric_name is None:
             continue
@@ -687,6 +709,32 @@ def _brand_findings_for_keys(
             seen_messages.add(message)
             findings.append(finding)
     return findings
+
+
+def _known_brand_candidates(core_frame: pd.DataFrame) -> set[str]:
+    candidates: set[str] = set()
+    if core_frame.empty:
+        return candidates
+    for column_name in ("canonical_brand_name", "brand_name"):
+        if column_name not in core_frame.columns:
+            continue
+        for value in core_frame[column_name].tolist():
+            cleaned = _clean_optional_text(value)
+            if cleaned is not None:
+                candidates.add(cleaned)
+    return candidates
+
+
+def _canonical_brand_lookup_key(
+    value: object,
+    *,
+    candidate_brands: set[str],
+) -> str | None:
+    cleaned = _clean_optional_text(value)
+    if cleaned is None:
+        return None
+    resolution = resolve_brand_name(cleaned, candidate_brands=candidate_brands)
+    return resolution.canonical_brand_name or cleaned
 
 
 def _validation_finding_applies_to_metric(finding: dict[str, Any], metric_name: str) -> bool:
