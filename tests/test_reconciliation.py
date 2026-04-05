@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from typer.testing import CliRunner
+
 from qsr_audit.cli import app
 from qsr_audit.config import Settings
 from qsr_audit.reconcile import (
@@ -15,7 +17,6 @@ from qsr_audit.reconcile import (
     reconcile_core_metrics,
     resolve_brand_name,
 )
-from typer.testing import CliRunner
 
 
 def _build_settings(tmp_path: Path) -> Settings:

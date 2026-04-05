@@ -8,11 +8,11 @@ from qsr_audit.reconcile.entity_resolution import (
     resolve_brand_series,
 )
 from qsr_audit.reconcile.pipeline import (
-    ReferenceCoverageArtifacts,
-    ReferenceCoverageRun,
     REFERENCE_TEMPLATE_FILES,
     ReconciliationArtifacts,
     ReconciliationRun,
+    ReferenceCoverageArtifacts,
+    ReferenceCoverageRun,
     audit_reference_coverage,
     build_reconciled_core_metrics,
     build_reference_coverage,
@@ -21,11 +21,8 @@ from qsr_audit.reconcile.pipeline import (
     render_reconciliation_summary,
     render_reference_coverage_summary,
     standardize_reference_frame,
-    write_reference_coverage_outputs,
     write_reconciliation_outputs,
-)
-from qsr_audit.reconcile.reference_audit import (
-    validate_reference_file as validate_reference_frame,
+    write_reference_coverage_outputs,
 )
 from qsr_audit.reconcile.provenance import (
     ProvenanceRecord,
@@ -41,6 +38,9 @@ from qsr_audit.reconcile.reconciliation import (
     grade_numeric_credibility,
     overall_reconciliation_grade,
     select_best_reference_row,
+)
+from qsr_audit.reconcile.reference_audit import (
+    validate_reference_file as validate_reference_frame,
 )
 
 __all__ = [

@@ -274,6 +274,10 @@ def build_reference_coverage(
     warnings: list[str] = []
     rows: list[dict[str, Any]] = []
 
+    if "canonical_brand_name" not in core_frame.columns and "brand_name" in core_frame.columns:
+        core_frame = core_frame.copy()
+        core_frame["canonical_brand_name"] = core_frame["brand_name"]
+
     core_rows = core_frame[["brand_name", "canonical_brand_name"]].copy()
     total_core_brands = len(core_rows.index)
     brand_rows: list[dict[str, Any]] = []

@@ -11,14 +11,6 @@ import pandas as pd
 
 from qsr_audit.config import Settings
 from qsr_audit.reconcile.entity_resolution import canonical_brand_dictionary, resolve_brand_name
-from qsr_audit.reconcile.reference_audit import (
-    REFERENCE_METRIC_COLUMNS as REFERENCE_AUDIT_METRIC_COLUMNS,
-    build_reference_coverage as build_reference_coverage_audit,
-    render_reference_coverage_report as render_reference_coverage_report_helper,
-    summarize_provenance_quality as summarize_provenance_quality_helper,
-    validate_reference_file as validate_reference_file_helper,
-    write_reference_coverage_outputs as write_reference_coverage_outputs_audit_helper,
-)
 from qsr_audit.reconcile.provenance import (
     ProvenanceRecord,
     ProvenanceRegistry,
@@ -29,6 +21,24 @@ from qsr_audit.reconcile.reconciliation import (
     compare_rank_field,
     overall_reconciliation_grade,
     select_best_reference_row,
+)
+from qsr_audit.reconcile.reference_audit import (
+    REFERENCE_METRIC_COLUMNS as REFERENCE_AUDIT_METRIC_COLUMNS,
+)
+from qsr_audit.reconcile.reference_audit import (
+    build_reference_coverage as build_reference_coverage_audit,
+)
+from qsr_audit.reconcile.reference_audit import (
+    render_reference_coverage_report as render_reference_coverage_report_helper,
+)
+from qsr_audit.reconcile.reference_audit import (
+    summarize_provenance_quality as summarize_provenance_quality_helper,
+)
+from qsr_audit.reconcile.reference_audit import (
+    validate_reference_file as validate_reference_file_helper,
+)
+from qsr_audit.reconcile.reference_audit import (
+    write_reference_coverage_outputs as write_reference_coverage_outputs_audit_helper,
 )
 
 REFERENCE_TEMPLATE_FILES = (
@@ -452,6 +462,9 @@ def build_reconciled_core_metrics(
     provenance_registry = ProvenanceRegistry()
     rows: list[dict[str, Any]] = []
     known_brands = canonical_brand_dictionary().keys()
+    if "canonical_brand_name" not in core_frame.columns and "brand_name" in core_frame.columns:
+        core_frame = core_frame.copy()
+        core_frame["canonical_brand_name"] = core_frame["brand_name"]
 
     for core_row in core_frame.to_dict(orient="records"):
         resolution = resolve_brand_name(core_row.get("brand_name"), candidate_brands=known_brands)

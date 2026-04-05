@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from qsr_audit.cli import app
 from typer.testing import CliRunner
+
+from qsr_audit.cli import app
 
 
 @pytest.mark.parametrize(
@@ -18,6 +19,7 @@ from typer.testing import CliRunner
                 "validate-workbook",
                 "run-syntheticness",
                 "reconcile",
+                "audit-reference",
                 "report",
             ],
         ),
@@ -35,7 +37,11 @@ from typer.testing import CliRunner
         ),
         (
             ["reconcile", "--help"],
-            ["manual reference", "--reference-dir"],
+            ["manual reference", "reference coverage", "--reference-dir"],
+        ),
+        (
+            ["audit-reference", "--help"],
+            ["manual reference coverage", "--core", "--reference-dir"],
         ),
         (
             ["report", "--help"],

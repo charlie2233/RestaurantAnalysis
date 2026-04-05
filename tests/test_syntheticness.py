@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from typer.testing import CliRunner
+
 from qsr_audit.cli import app
 from qsr_audit.config import Settings
 from qsr_audit.validate import run_syntheticness
@@ -19,7 +21,6 @@ from qsr_audit.validate.syntheticness_stats import (
     extract_first_digits,
     extract_first_two_digits,
 )
-from typer.testing import CliRunner
 
 
 def _build_settings(tmp_path: Path) -> Settings:

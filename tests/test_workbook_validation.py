@@ -7,11 +7,12 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from typer.testing import CliRunner
+
 from qsr_audit.cli import app
 from qsr_audit.config import Settings
 from qsr_audit.ingest import ingest_workbook
 from qsr_audit.validate import validate_workbook
-from typer.testing import CliRunner
 
 
 def _build_settings(tmp_path: Path) -> Settings:
