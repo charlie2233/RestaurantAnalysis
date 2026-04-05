@@ -15,6 +15,7 @@ qsr-audit ingest-workbook --input data/raw/source_workbook.xlsx
 qsr-audit validate-workbook --input data/silver --tolerance-auv 0.05
 qsr-audit run-syntheticness --input data/silver/core_brand_metrics.parquet
 qsr-audit reconcile --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
+qsr-audit gate-gold
 qsr-audit report --output reports/
 ```
 
@@ -48,7 +49,15 @@ qsr-audit report --output reports/
   - If a field is unknown, leave it blank instead of inventing a placeholder value.
   - Partial CSV rows are acceptable only when the missing cells are genuinely unknown. Empty coverage is explicit and should not be read as confirmation.
 
-### 5. Report
+### 5. Gate Gold
+
+- Applies the explicit Gold publishing policy to decide which KPI rows are publishable, advisory, or blocked.
+- Writes `data/gold/gold_publish_decisions.parquet`, `data/gold/publishable_kpis.parquet`, `data/gold/blocked_kpis.parquet`, and `reports/audit/gold_publish_scorecard.md`.
+- Treat `publishable` as the only status safe for external KPI export.
+- Treat `advisory` as analyst context only. It is not safe for external export and should never be promoted silently.
+- Treat `blocked` as unsafe until the specific blocking evidence is resolved.
+
+### 6. Report
 
 - Generates executive-facing scorecards and brand-level debugging outputs in Markdown, HTML, and JSON.
 - Also produces strategy recommendations as a downstream Gold consumer.
@@ -66,6 +75,14 @@ qsr-audit report --output reports/
 - Start with `overall_credibility_grade`, then inspect field-level grades.
 - Review `*_relative_error` and `reconciliation_warning` for the largest conflicts.
 - Check `provenance_registry.parquet` when source coverage or method matters.
+
+### Gold publishing outputs
+
+- `publishable_kpis.parquet` is the safe subset for external-facing KPI export under the current policy.
+- `gold_publish_decisions.parquet` is the full audit log. Use it when you need to see why a row was downgraded or blocked.
+- `blocked_kpis.parquet` is the immediate queue for analyst follow-up.
+- If a metric is `advisory`, it stays out of published exports even when the value looks plausible.
+- Missing provenance, unresolved AUV contradictions, and weak or contradictory reconciliation evidence are the main reasons external metrics get blocked.
 
 ### Syntheticness outputs
 
@@ -85,11 +102,13 @@ qsr-audit report --output reports/
 1. Read `reports/validation/validation_summary.md`.
 2. Read `reports/reconciliation/reconciliation_summary.md`.
 3. Check `reports/index.md` for portfolio scorecards.
-4. Open specific `reports/brands/*.md` files for brand-level debugging.
-5. Read `reports/strategy/strategy_playbook.md` only after the earlier steps.
+4. Read `reports/audit/gold_publish_scorecard.md`.
+5. Open specific `reports/brands/*.md` files for brand-level debugging.
+6. Read `reports/strategy/strategy_playbook.md` only after the earlier steps.
 
 ## Escalation guidance
 
 - Escalate validation `error` findings before using a brand in a strategic recommendation.
 - Escalate reconciliation gaps when `reference_source_count == 0` or credibility is `MISSING`, `D`, or `F`.
+- Escalate any KPI row that stays `advisory` or `blocked` in the Gold publishing gate before using it externally.
 - Escalate strategy recommendations only as hypotheses when the underlying Gold credibility is weak.

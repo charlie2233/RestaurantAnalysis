@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 
 from qsr_audit.config import get_settings
+from qsr_audit.gold import gate_gold_publish as gate_gold_publish_pipeline
 from qsr_audit.ingest import ingest_workbook as ingest_workbook_pipeline
 from qsr_audit.reconcile import audit_reference_coverage as audit_reference_coverage_pipeline
 from qsr_audit.reconcile import reconcile_core_metrics as reconcile_core_metrics_pipeline
@@ -253,6 +254,24 @@ def audit_reference_command(
     console.print(f"Warnings: {len(run.warnings)}")
     console.print(f"Coverage parquet: {run.artifacts.coverage_parquet_path}")
     console.print(f"Coverage markdown: {run.artifacts.coverage_markdown_path}")
+
+
+@app.command("gate-gold")
+def gate_gold_command() -> None:
+    """Evaluate Gold publishing gates and emit KPI export decisions plus an audit scorecard."""
+
+    run = gate_gold_publish_pipeline(settings=get_settings())
+    console.print("[bold green]Gold publishing gates complete[/bold green]")
+    console.print(f"Policy: {run.policy_id} {run.policy_version}")
+    console.print(f"Decision rows: {len(run.decisions.index)}")
+    console.print(f"Publishable KPIs: {run.summary['publishable_count']}")
+    console.print(f"Advisory KPIs: {run.summary['advisory_count']}")
+    console.print(f"Blocked KPIs: {run.summary['blocked_count']}")
+    console.print(f"Gold decisions: {run.artifacts.decisions_path}")
+    console.print(f"Publishable parquet: {run.artifacts.publishable_path}")
+    console.print(f"Blocked parquet: {run.artifacts.blocked_path}")
+    console.print(f"Scorecard: {run.artifacts.scorecard_markdown_path}")
+    console.print(f"Summary JSON: {run.artifacts.summary_json_path}")
 
 
 @app.command()

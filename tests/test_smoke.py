@@ -15,6 +15,7 @@ def test_subpackages_importable():
         "normalize",
         "validate",
         "reconcile",
+        "gold",
         "reporting",
         "strategy",
         "models",
