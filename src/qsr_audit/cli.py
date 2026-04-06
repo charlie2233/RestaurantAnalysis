@@ -17,6 +17,7 @@ from qsr_audit.ingest import ingest_workbook as ingest_workbook_pipeline
 from qsr_audit.rag import build_rag_corpus as build_rag_corpus_pipeline
 from qsr_audit.rag import eval_rag_retrieval as eval_rag_retrieval_pipeline
 from qsr_audit.rag import rag_search as rag_search_pipeline
+from qsr_audit.rag import resolve_rag_corpus_path
 from qsr_audit.reconcile import audit_reference_coverage as audit_reference_coverage_pipeline
 from qsr_audit.reconcile import reconcile_core_metrics as reconcile_core_metrics_pipeline
 from qsr_audit.reporting import write_reports as write_reports_pipeline
@@ -575,10 +576,9 @@ def rag_search_command(
     """Run retrieval-only search and print ranked chunks plus metadata as JSON, not generated answers."""
 
     settings = get_settings()
-    resolved_corpus_path = (
-        corpus_path
-        if corpus_path is not None
-        else settings.artifacts_dir / "rag" / "corpus" / "corpus.parquet"
+    resolved_corpus_path = resolve_rag_corpus_path(
+        settings=settings,
+        corpus_path=corpus_path,
     )
     if not resolved_corpus_path.exists():
         raise typer.BadParameter(

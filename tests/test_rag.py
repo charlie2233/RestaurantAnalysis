@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from typer.testing import CliRunner
-
 from qsr_audit.cli import app
 from qsr_audit.rag import build_rag_corpus, eval_rag_retrieval
+from typer.testing import CliRunner
+
 from tests.helpers import build_settings
 
 
@@ -349,6 +349,22 @@ def test_eval_rag_retrieval_bm25_runs_on_tiny_fixture(tmp_path: Path) -> None:
     assert "Index size bytes" in summary
 
 
+def test_eval_rag_retrieval_defaults_to_settings_artifacts_dir_corpus(tmp_path: Path) -> None:
+    settings = build_settings(tmp_path)
+    _write_rag_source_artifacts(settings)
+    build_rag_corpus(settings=settings)
+
+    run = eval_rag_retrieval(
+        settings=settings,
+        retrievers=("bm25",),
+        top_k=2,
+    )
+
+    assert run.summary["corpus_path"] == str(
+        (settings.artifacts_dir / "rag" / "corpus" / "corpus.parquet").resolve()
+    )
+
+
 def test_rag_cli_default_build_then_eval_uses_default_corpus_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -387,6 +403,34 @@ def test_rag_cli_eval_accepts_relative_corpus_path(
             "eval-rag-retrieval",
             "--corpus-path",
             "artifacts/rag/corpus/corpus.parquet",
+            "--retriever",
+            "bm25",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "RAG retrieval benchmark complete" in result.output
+
+
+def test_rag_cli_eval_accepts_absolute_corpus_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = build_settings(tmp_path)
+    _write_rag_source_artifacts(settings)
+    _set_cli_env(monkeypatch, settings)
+
+    runner = CliRunner()
+    build_result = runner.invoke(app, ["build-rag-corpus"])
+    assert build_result.exit_code == 0
+
+    corpus_path = (settings.artifacts_dir / "rag" / "corpus" / "corpus.parquet").resolve()
+    result = runner.invoke(
+        app,
+        [
+            "eval-rag-retrieval",
+            "--corpus-path",
+            str(corpus_path),
             "--retriever",
             "bm25",
         ],

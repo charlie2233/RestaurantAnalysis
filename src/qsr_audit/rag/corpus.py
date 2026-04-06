@@ -15,6 +15,7 @@ import pandas as pd
 from qsr_audit.config import Settings
 
 DEFAULT_CORPUS_SUBDIR = Path("rag/corpus")
+DEFAULT_CORPUS_FILE = Path("corpus.parquet")
 DEFAULT_CHUNK_CHARS = 900
 DEFAULT_OVERLAP_CHARS = 120
 MANUAL_REFERENCE_NOTE_CANDIDATES = (
@@ -182,7 +183,7 @@ def build_rag_corpus(
     if not corpus.empty:
         corpus = corpus[_corpus_columns()]
 
-    corpus_parquet_path = resolved_output_root / "corpus.parquet"
+    corpus_parquet_path = resolved_output_root / DEFAULT_CORPUS_FILE
     corpus_jsonl_path = resolved_output_root / "corpus.jsonl"
     manifest_path = resolved_output_root / "manifest.json"
 
@@ -238,6 +239,20 @@ def load_rag_corpus(corpus_path: Path) -> pd.DataFrame:
     """Load a previously built corpus parquet file."""
 
     return pd.read_parquet(corpus_path)
+
+
+def resolve_rag_corpus_path(*, settings: Settings, corpus_path: Path | None = None) -> Path:
+    """Resolve a corpus path against the configured artifacts directory when needed."""
+
+    if corpus_path is None:
+        return (settings.artifacts_dir / DEFAULT_CORPUS_SUBDIR / DEFAULT_CORPUS_FILE).resolve()
+
+    candidate = corpus_path.expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    if candidate.exists():
+        return candidate.resolve()
+    return (settings.artifacts_dir / candidate).resolve()
 
 
 def _resolve_output_root(*, output_root: Path | None, settings: Settings) -> Path:

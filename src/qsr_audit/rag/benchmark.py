@@ -12,11 +12,10 @@ from typing import Any
 import pandas as pd
 
 from qsr_audit.config import Settings
-from qsr_audit.rag.corpus import load_rag_corpus
+from qsr_audit.rag.corpus import load_rag_corpus, resolve_rag_corpus_path
 from qsr_audit.rag.retrieval import prepare_retriever, rag_search
 
 DEFAULT_BENCHMARKS_SUBDIR = Path("rag/benchmarks")
-DEFAULT_CORPUS_PATH = Path("artifacts/rag/corpus/corpus.parquet")
 DEFAULT_RETRIEVAL_BENCHMARK: tuple[dict[str, Any], ...] = (
     {
         "query_id": "blocked-kpi-smoke",
@@ -92,10 +91,9 @@ def eval_rag_retrieval(
     """Run retrieval-only evaluation over a local benchmark fixture."""
 
     resolved_settings = settings or Settings()
-    resolved_corpus_path = (
-        corpus_path
-        if corpus_path is not None
-        else resolved_settings.artifacts_dir / DEFAULT_CORPUS_PATH
+    resolved_corpus_path = resolve_rag_corpus_path(
+        settings=resolved_settings,
+        corpus_path=corpus_path,
     )
     if not resolved_corpus_path.exists():
         raise FileNotFoundError(
