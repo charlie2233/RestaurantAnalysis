@@ -68,7 +68,7 @@ full Whisper-family baseline in the evaluation set.
 Optional rerankers:
 
 - [`cross-encoder/ms-marco-MiniLM-L6-v2`](https://hf.co/cross-encoder/ms-marco-MiniLM-L6-v2)
-  as a cheap top-k reranker.
+  as the default cheap top-k reranker for offline benchmark comparison only.
 - [`BAAI/bge-reranker-base`](https://hf.co/BAAI/bge-reranker-base) only if the
   lightweight reranker leaves clear quality headroom.
 
@@ -84,6 +84,8 @@ Current repo posture:
 - The repo now includes a retrieval-only scaffold under `artifacts/rag/`.
 - There is still no answer generation or production RAG service path.
 - Dense retrieval must be explicitly enabled and is skipped in CI.
+- Lightweight reranking is also opt-in, offline-only, and skipped in CI when
+  weights are unavailable.
 - Retrieval experiments must index only vetted Gold or provenance-aware reviewed artifacts.
 
 ## Decision posture

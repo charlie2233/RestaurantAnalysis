@@ -26,7 +26,9 @@ from typer.testing import CliRunner
                 "build-forecast-panel",
                 "forecast-baseline",
                 "build-rag-corpus",
+                "validate-rag-benchmark",
                 "eval-rag-retrieval",
+                "inspect-rag-benchmark",
                 "rag-search",
                 "report",
             ],
@@ -100,11 +102,27 @@ from typer.testing import CliRunner
             ],
         ),
         (
+            ["validate-rag-benchmark", "--help"],
+            [
+                "analyst-authored benchmark",
+                "queries.csv",
+                "judgments.csv",
+            ],
+        ),
+        (
             ["eval-rag-retrieval", "--help"],
             [
                 "retrieval-only baselines",
-                "benchmark fixture",
+                "analyst-authored benchmark pack",
                 "dense-minilm",
+            ],
+        ),
+        (
+            ["inspect-rag-benchmark", "--help"],
+            [
+                "Inspect one benchmark query",
+                "query_id",
+                "failure diagnosis",
             ],
         ),
         (

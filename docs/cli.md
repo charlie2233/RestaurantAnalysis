@@ -112,24 +112,60 @@
   - `artifacts/rag/corpus/corpus.jsonl`
   - `artifacts/rag/corpus/manifest.json`
 
+### `qsr-audit validate-rag-benchmark --benchmark-dir <path>`
+
+- Purpose: validate an analyst-authored benchmark pack against the current
+  vetted retrieval corpus.
+- Validation catches:
+  - duplicate query IDs
+  - duplicate or contradictory judgments
+  - dangling doc/chunk references
+  - invalid relevance labels
+  - malformed filters
+  - empty packs
+- Validation semantics:
+  - malformed row values become structured validation issues when the pack can still be loaded
+  - `chunk_id` judgments require the exact chunk
+  - `doc_id` judgments are satisfied by any retrieved chunk from that document
+- Primary outputs:
+  - `artifacts/rag/benchmarks/validation/validation_results.json`
+  - `artifacts/rag/benchmarks/validation/validation_summary.md`
+  - `artifacts/rag/benchmarks/validation/query_specs.json`
+
 ### `qsr-audit eval-rag-retrieval`
 
-- Purpose: benchmark retrieval-only baselines over a local query and relevance fixture.
+- Purpose: benchmark retrieval-only baselines over the default smoke fixture or
+  an analyst-authored benchmark pack.
 - Baselines:
   - BM25 lexical retrieval
   - optional `dense-minilm`
   - optional `dense-bge-small`
   - optional `dense-e5-small` only when explicitly requested
+- Optional reranker:
+  - `rerank-cross-minilm`
 - Guardrails:
   - dense retrieval remains opt-in
+  - reranking remains opt-in
   - dense retrieval is skipped in CI
+  - reranking is skipped in CI when weights are unavailable
   - writes only under `artifacts/rag/benchmarks/`
 - Primary outputs:
-  - `artifacts/rag/benchmarks/retrieval_metrics.json`
-  - `artifacts/rag/benchmarks/retrieval_metrics.csv`
-  - `artifacts/rag/benchmarks/retrieval_results.parquet`
-  - `artifacts/rag/benchmarks/failure_cases.json`
-  - `artifacts/rag/benchmarks/retrieval_summary.md`
+  - `artifacts/rag/benchmarks/metrics.json`
+  - `artifacts/rag/benchmarks/metrics.csv`
+  - `artifacts/rag/benchmarks/per_query_results.parquet`
+  - `artifacts/rag/benchmarks/failure_cases.md`
+  - `artifacts/rag/benchmarks/summary.md`
+  - `artifacts/rag/benchmarks/query_bucket_metrics.csv`
+  - `artifacts/rag/benchmarks/rerank_delta.csv` when reranking is enabled
+
+### `qsr-audit inspect-rag-benchmark --query-id <id> --benchmark-dir <path>`
+
+- Purpose: inspect one benchmark query, its active filters, expected relevant
+  chunks, retrieved chunks, and a failure diagnosis.
+- Guardrails:
+  - prints chunks plus metadata only
+  - does not synthesize answers
+  - does not write under `reports/` or `strategy/`
 
 ### `qsr-audit rag-search --query "..."`
 
@@ -177,7 +213,9 @@ qsr-audit forecast-baseline --metric system_sales
 
 ```bash
 qsr-audit build-rag-corpus
-qsr-audit eval-rag-retrieval --retriever bm25
+qsr-audit validate-rag-benchmark --benchmark-dir data/rag_benchmarks/my-pack
+qsr-audit eval-rag-retrieval --benchmark-dir data/rag_benchmarks/my-pack --retriever bm25
+qsr-audit inspect-rag-benchmark --benchmark-dir data/rag_benchmarks/my-pack --query-id blocked-kpi
 qsr-audit rag-search --query "Which KPI rows are blocked?" --top-k 5
 ```
 
@@ -189,3 +227,4 @@ qsr-audit rag-search --query "Which KPI rows are blocked?" --top-k 5
 - Strategy is downstream-only. It must consume Gold outputs and must not redefine business truth on its own.
 - Forecasting commands are experimental and offline-only. Their outputs are not audited facts and must not be surfaced as analyst-facing reports in this scaffold.
 - Retrieval commands are experimental and retrieval-only. Retrieved chunks are navigation aids, not audited answers.
+- Analyst-authored benchmark packs live under `data/rag_benchmarks/`, but benchmark outputs always belong under `artifacts/rag/benchmarks/`.

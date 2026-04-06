@@ -10,7 +10,8 @@ The first experiment is retrieval quality only:
 - corpus construction from vetted local artifacts
 - BM25 lexical retrieval
 - opt-in dense retrieval on small local models
-- benchmarked chunk lookup with relevance judgments
+- analyst-authored benchmarked chunk lookup with relevance judgments
+- optional lightweight reranking on the first-pass candidate set
 
 Out of scope in this PR:
 
@@ -24,7 +25,9 @@ Out of scope in this PR:
 
 ```bash
 qsr-audit build-rag-corpus
-qsr-audit eval-rag-retrieval --retriever bm25
+qsr-audit validate-rag-benchmark --benchmark-dir data/rag_benchmarks/my-pack
+qsr-audit eval-rag-retrieval --benchmark-dir data/rag_benchmarks/my-pack --retriever bm25
+qsr-audit inspect-rag-benchmark --benchmark-dir data/rag_benchmarks/my-pack --query-id blocked-kpi
 qsr-audit rag-search --query "Which KPI rows are blocked?" --top-k 5
 ```
 
@@ -71,11 +74,35 @@ Opt-in dense comparisons:
 Dense retrieval is local-only and safely skipped in CI. Model downloads are not
 allowed unless explicitly requested.
 
-## Benchmark shape
+## Benchmark pack contract
 
-The benchmark harness expects a small JSON fixture of analyst-style questions
-plus relevance judgments. Relevance can be authored with explicit chunk IDs or
-with stable metadata selectors.
+The default fixture still exists for smoke testing, but meaningful evaluation
+should use the committed CSV benchmark-pack contract under
+`data/rag_benchmarks/templates/`.
+
+Required files:
+
+- `queries.csv`
+- `judgments.csv`
+
+Optional files:
+
+- `filters.csv`
+- `query_groups.csv`
+
+The benchmark validator catches:
+
+- duplicate query IDs
+- duplicate or contradictory judgments
+- dangling `doc_id` or `chunk_id` references
+- invalid relevance labels
+- malformed filters
+- empty benchmark packs
+- duplicate query text with conflicting intent metadata
+
+Benchmark validation output lives under `artifacts/rag/benchmarks/validation/`.
+
+## Evaluation outputs
 
 Minimum evaluation metrics:
 
@@ -87,19 +114,40 @@ Minimum evaluation metrics:
 - latency
 - index size
 
-Benchmark outputs live under `artifacts/rag/benchmarks/` as machine-readable
-metrics, per-query retrieval results, a concise markdown summary, and failure
-case details.
+Benchmark outputs live under `artifacts/rag/benchmarks/`:
+
+- `metrics.json`
+- `metrics.csv`
+- `per_query_results.parquet`
+- `summary.md`
+- `failure_cases.md`
+- `query_bucket_metrics.csv`
+- `rerank_delta.csv` when reranking is enabled
 
 ## Relevance judgments
 
-The checked-in default fixture is only a smoke benchmark. A meaningful analyst
-benchmark still requires:
+The checked-in templates are only scaffolding. A meaningful analyst benchmark
+still requires:
 
 - representative analyst questions
 - relevance judgments tied to real local artifact coverage
 - explicit metadata filters where the query implies them
 - reviewed failure cases for low-recall queries
+- ambiguity flags where multiple interpretations are realistic
+- citation requirements for provenance-sensitive lookups
+
+## Reranking
+
+Optional reranking is available only for offline comparison on top of a first
+retrieval pass. It is not enabled by default.
+
+Current lightweight reranker:
+
+- `cross-encoder/ms-marco-MiniLM-L6-v2`
+
+Reranking remains local-only, opt-in, and safely skipped in CI when weights are
+not available. Use it only after the base retrieval benchmark pack is in place,
+because reranking cannot fix a weak or mislabeled benchmark contract.
 
 ## Guardrails
 

@@ -91,7 +91,9 @@ over vetted local artifacts, not to generate analyst-facing answers.
 
 ```bash
 qsr-audit build-rag-corpus
-qsr-audit eval-rag-retrieval --retriever bm25
+qsr-audit validate-rag-benchmark --benchmark-dir data/rag_benchmarks/my-pack
+qsr-audit eval-rag-retrieval --benchmark-dir data/rag_benchmarks/my-pack --retriever bm25
+qsr-audit inspect-rag-benchmark --benchmark-dir data/rag_benchmarks/my-pack --query-id blocked-kpi
 qsr-audit rag-search --query "Which KPI rows are blocked?" --top-k 5
 ```
 
@@ -102,6 +104,8 @@ Rules:
 - Retrieved chunks are not audited facts on their own.
 - Retrieval artifacts belong under `artifacts/rag/`, not `reports/` or `strategy/`.
 - Dense retrieval is opt-in and may be skipped when weights are unavailable or CI is running.
+- Author benchmark packs manually under `data/rag_benchmarks/`: leave unknowns blank, label ambiguity explicitly, and do not invent judgments for evidence that is not in the vetted corpus.
+- Use reranking only after the benchmark pack is valid and the first-pass retriever quality is measurable.
 
 ## How to read the outputs
 
@@ -136,7 +140,8 @@ Rules:
 ### Retrieval experiment outputs
 
 - `artifacts/rag/corpus/` holds the retrieval corpus parquet, JSONL, and manifest.
-- `artifacts/rag/benchmarks/` holds benchmark metrics, per-query retrieval results, failure cases, and summary markdown.
+- `artifacts/rag/benchmarks/validation/` holds benchmark-pack validation output.
+- `artifacts/rag/benchmarks/` holds benchmark metrics, per-query retrieval results, failure cases, bucket metrics, rerank deltas, and summary markdown.
 - `rag-search` returns chunks plus metadata only. It does not synthesize answers.
 - If a retrieved chunk is `blocked` or `advisory`, that status is context, not clearance to use it externally.
 

@@ -68,3 +68,12 @@ Each chunk carries these fields:
 - `blocked` means unresolved issues remain
 
 Retrieval results are navigation aids. They are not audited facts by themselves.
+
+## Retrieval benchmark linkage
+
+- Retrieval benchmarks must reference corpus `doc_id` or `chunk_id` values that
+  come from this vetted corpus, not from raw workbook tabs or Silver tables.
+- If a chunk originates from a `blocked` or `advisory` row, that status must
+  remain explicit in corpus metadata and in retrieval results.
+- Benchmark packs belong under `data/rag_benchmarks/`, while benchmark outputs
+  belong under `artifacts/rag/benchmarks/`.
