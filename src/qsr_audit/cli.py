@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -14,10 +15,12 @@ from qsr_audit.forecasting import forecast_baselines as forecast_baselines_pipel
 from qsr_audit.forecasting import snapshot_gold_history as snapshot_gold_history_pipeline
 from qsr_audit.gold import gate_gold_publish as gate_gold_publish_pipeline
 from qsr_audit.ingest import ingest_workbook as ingest_workbook_pipeline
+from qsr_audit.rag import available_reranker_names, resolve_rag_corpus_path
 from qsr_audit.rag import build_rag_corpus as build_rag_corpus_pipeline
 from qsr_audit.rag import eval_rag_retrieval as eval_rag_retrieval_pipeline
+from qsr_audit.rag import inspect_rag_benchmark_query as inspect_rag_benchmark_query_pipeline
 from qsr_audit.rag import rag_search as rag_search_pipeline
-from qsr_audit.rag import resolve_rag_corpus_path
+from qsr_audit.rag import validate_rag_benchmark_pack as validate_rag_benchmark_pack_pipeline
 from qsr_audit.reconcile import audit_reference_coverage as audit_reference_coverage_pipeline
 from qsr_audit.reconcile import reconcile_core_metrics as reconcile_core_metrics_pipeline
 from qsr_audit.reporting import write_reports as write_reports_pipeline
@@ -177,6 +180,22 @@ BenchmarkPathOption = Annotated[
     ),
 ]
 
+BenchmarkDirOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--benchmark-dir",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        path_type=Path,
+        help=(
+            "Directory containing analyst-authored `queries.csv`, `judgments.csv`, and "
+            "optional `filters.csv` / `query_groups.csv`."
+        ),
+    ),
+]
+
 RagOutputOption = Annotated[
     Path | None,
     typer.Option(
@@ -185,8 +204,7 @@ RagOutputOption = Annotated[
         dir_okay=True,
         path_type=Path,
         help=(
-            "Directory for non-analyst-facing retrieval artifacts. Defaults to "
-            "`artifacts/rag/...`."
+            "Directory for non-analyst-facing retrieval artifacts. Defaults to `artifacts/rag/...`."
         ),
     ),
 ]
@@ -199,6 +217,18 @@ RetrieverOption = typer.Option(
         "--retriever dense-minilm`."
     ),
 )
+
+RerankerOption = Annotated[
+    str | None,
+    typer.Option(
+        "--reranker",
+        help=(
+            "Optional reranker slug for benchmark comparison. Supported values: "
+            + ", ".join(available_reranker_names())
+            + "."
+        ),
+    ),
+]
 
 
 @app.command()
@@ -502,10 +532,69 @@ def build_rag_corpus_command(
     console.print(f"Manifest: {run.artifacts.manifest_path}")
 
 
+@app.command("validate-rag-benchmark")
+def validate_rag_benchmark_command(
+    benchmark_dir: Annotated[
+        Path,
+        typer.Option(
+            ...,
+            "--benchmark-dir",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            path_type=Path,
+            help=(
+                "Directory containing analyst-authored benchmark CSV files such as "
+                "`queries.csv` and `judgments.csv`."
+            ),
+        ),
+    ],
+    corpus_path: CorpusPathOption = None,
+) -> None:
+    """Validate an analyst-authored benchmark pack against the current vetted retrieval corpus."""
+
+    settings = get_settings()
+    resolved_corpus_path = resolve_rag_corpus_path(
+        settings=settings,
+        corpus_path=corpus_path,
+    )
+    if not resolved_corpus_path.exists():
+        raise typer.BadParameter(
+            "Benchmark validation requires an existing corpus parquet. Run "
+            "`qsr-audit build-rag-corpus` first or pass `--corpus-path`."
+        )
+
+    from qsr_audit.rag import load_rag_corpus
+
+    try:
+        run = validate_rag_benchmark_pack_pipeline(
+            benchmark_dir=benchmark_dir,
+            corpus=load_rag_corpus(resolved_corpus_path),
+            settings=settings,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    error_count = len([issue for issue in run.issues if issue["severity"] == "error"])
+    warning_count = len([issue for issue in run.issues if issue["severity"] == "warning"])
+    console.print("[bold blue]RAG benchmark validation complete[/bold blue]")
+    console.print(f"Queries: {len(run.pack.queries.index)}")
+    console.print(f"Judgments: {len(run.pack.judgments.index)}")
+    console.print(f"Errors: {error_count}")
+    console.print(f"Warnings: {warning_count}")
+    console.print(f"Validation JSON: {run.artifacts.validation_json_path}")
+    console.print(f"Validation summary: {run.artifacts.validation_markdown_path}")
+    console.print(f"Query specs: {run.artifacts.query_specs_json_path}")
+    if not run.passed:
+        raise typer.Exit(code=1)
+
+
 @app.command("eval-rag-retrieval")
 def eval_rag_retrieval_command(
     corpus_path: CorpusPathOption = None,
     benchmark_path: BenchmarkPathOption = None,
+    benchmark_dir: BenchmarkDirOption = None,
     output_root: RagOutputOption = None,
     retriever: list[str] = RetrieverOption,
     top_k: int = typer.Option(
@@ -514,23 +603,36 @@ def eval_rag_retrieval_command(
         min=1,
         help="Top-k depth for retrieval metrics such as Recall@k and nDCG@k.",
     ),
+    reranker_name: RerankerOption = None,
+    rerank_top_n: int = typer.Option(
+        10,
+        "--rerank-top-n",
+        min=1,
+        help=(
+            "Candidate set depth to rerank when `--reranker` is enabled. The reranker remains "
+            "opt-in and offline-only."
+        ),
+    ),
     allow_model_download: bool = typer.Option(
         False,
         "--allow-model-download/--skip-model-download",
         help="Allow optional dense retrievers to download local model weights when not already cached.",
     ),
 ) -> None:
-    """Evaluate retrieval-only baselines over a local benchmark fixture."""
+    """Evaluate retrieval-only baselines over the default fixture or an analyst-authored benchmark pack."""
 
     try:
         run = eval_rag_retrieval_pipeline(
             settings=get_settings(),
             corpus_path=corpus_path,
             benchmark_path=benchmark_path,
+            benchmark_dir=benchmark_dir,
             output_root=output_root,
             retrievers=retriever or ["bm25"],
             top_k=top_k,
             allow_model_download=allow_model_download,
+            reranker_name=reranker_name,
+            rerank_top_n=rerank_top_n,
         )
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -538,10 +640,14 @@ def eval_rag_retrieval_command(
     console.print("[bold blue]RAG retrieval benchmark complete[/bold blue]")
     console.print(f"Corpus chunks: {run.summary['corpus_chunk_count']}")
     console.print(f"Queries: {run.summary['query_count']}")
+    console.print(f"Judged queries: {run.summary['judged_query_count']}")
     console.print(f"Metrics JSON: {run.artifacts.metrics_json_path}")
     console.print(f"Metrics CSV: {run.artifacts.metrics_csv_path}")
     console.print(f"Results parquet: {run.artifacts.results_parquet_path}")
-    console.print(f"Failure cases: {run.artifacts.failure_cases_json_path}")
+    console.print(f"Failure cases: {run.artifacts.failure_cases_markdown_path}")
+    console.print(f"Bucket metrics CSV: {run.artifacts.query_bucket_metrics_csv_path}")
+    if run.artifacts.rerank_delta_csv_path is not None:
+        console.print(f"Rerank delta CSV: {run.artifacts.rerank_delta_csv_path}")
     console.print(f"Summary: {run.artifacts.summary_markdown_path}")
 
 
@@ -598,6 +704,74 @@ def rag_search_command(
     if run.status != "ok":
         raise typer.BadParameter(run.reason or "RAG search could not be executed.")
     typer.echo(run.results.to_json(orient="records", force_ascii=False))
+
+
+@app.command("inspect-rag-benchmark")
+def inspect_rag_benchmark_command(
+    query_id: Annotated[
+        str,
+        typer.Option(
+            ...,
+            "--query-id",
+            help="Benchmark query_id to inspect against the current corpus and retriever.",
+        ),
+    ],
+    benchmark_dir: Annotated[
+        Path,
+        typer.Option(
+            ...,
+            "--benchmark-dir",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            path_type=Path,
+            help="Directory containing analyst-authored benchmark CSV files.",
+        ),
+    ],
+    corpus_path: CorpusPathOption = None,
+    top_k: int = typer.Option(
+        5,
+        "--top-k",
+        min=1,
+        help="Maximum number of retrieved chunks to inspect.",
+    ),
+    retriever_name: str = typer.Option(
+        "bm25",
+        "--retriever",
+        help="Retriever slug such as `bm25`, `dense-minilm`, or `dense-bge-small`.",
+    ),
+    reranker_name: RerankerOption = None,
+    rerank_top_n: int = typer.Option(
+        10,
+        "--rerank-top-n",
+        min=1,
+        help="Candidate depth to rerank when `--reranker` is enabled.",
+    ),
+    allow_model_download: bool = typer.Option(
+        False,
+        "--allow-model-download/--skip-model-download",
+        help="Allow optional dense retrieval or reranking models to download weights when not already cached.",
+    ),
+) -> None:
+    """Inspect one benchmark query and print expected evidence, retrieved chunks, and failure diagnosis."""
+
+    try:
+        payload = inspect_rag_benchmark_query_pipeline(
+            settings=get_settings(),
+            corpus_path=corpus_path,
+            benchmark_dir=benchmark_dir,
+            query_id=query_id,
+            retriever_name=retriever_name,
+            top_k=top_k,
+            allow_model_download=allow_model_download,
+            reranker_name=reranker_name,
+            rerank_top_n=rerank_top_n,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 @app.command()

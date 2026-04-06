@@ -20,6 +20,9 @@ _DENSE_RETRIEVER_MODELS = {
     "dense-bge-small": "BAAI/bge-small-en-v1.5",
     "dense-e5-small": "intfloat/e5-small-v2",
 }
+_RERANKER_MODELS = {
+    "rerank-cross-minilm": "cross-encoder/ms-marco-MiniLM-L6-v2",
+}
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,17 @@ class RagSearchRun:
     reason: str | None
     latency_ms: float
     index_size_bytes: int
+
+
+@dataclass(frozen=True)
+class RagRerankRun:
+    """Result of reranking an existing candidate set locally."""
+
+    reranker_name: str
+    results: pd.DataFrame
+    status: str
+    reason: str | None
+    latency_ms: float
 
 
 def prepare_retriever(
@@ -99,7 +113,18 @@ def available_retriever_names() -> tuple[str, ...]:
     return ("bm25", *tuple(_DENSE_RETRIEVER_MODELS.keys()))
 
 
+def available_reranker_names() -> tuple[str, ...]:
+    """Return supported reranker slugs."""
+
+    return tuple(_RERANKER_MODELS.keys())
+
+
 class _SkippedRetriever:
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+
+class _SkippedReranker:
     def __init__(self, reason: str) -> None:
         self.reason = reason
 
@@ -232,6 +257,48 @@ class _DenseRetriever:
         return _rank_results(candidate_rows, top_k=top_k, retriever_name=self.retriever_name)
 
 
+class _CrossEncoderReranker:
+    def __init__(
+        self,
+        *,
+        reranker_name: str,
+        model_name: str,
+        allow_model_download: bool,
+    ) -> None:
+        from sentence_transformers import CrossEncoder
+
+        self.reranker_name = reranker_name
+        self.model_name = model_name
+        self.model = CrossEncoder(
+            model_name,
+            device="cpu",
+            trust_remote_code=False,
+            local_files_only=not allow_model_download,
+        )
+
+    def rerank(
+        self,
+        *,
+        query: str,
+        results: pd.DataFrame,
+        top_k: int,
+    ) -> pd.DataFrame:
+        if results.empty:
+            return pd.DataFrame(columns=_result_columns())
+        reranked = results.copy().reset_index(drop=True)
+        pairs = [(query, text) for text in reranked["text"].fillna("")]
+        scores = self.model.predict(pairs, convert_to_numpy=True, show_progress_bar=False)
+        reranked["score"] = [round(float(score), 6) for score in scores.tolist()]
+        reranked = reranked.sort_values(
+            by=["score", "chunk_id"],
+            ascending=[False, True],
+            kind="mergesort",
+        ).head(top_k)
+        reranked = reranked.reset_index(drop=True)
+        reranked["rank"] = range(1, len(reranked.index) + 1)
+        return reranked[_result_columns()]
+
+
 def _resolve_retriever(
     *,
     retriever_name: str,
@@ -269,11 +336,80 @@ def _resolve_retriever(
         return _SkippedRetriever(f"`{retriever_name}` could not be initialized locally: {exc}")
 
 
+def prepare_reranker(
+    *,
+    reranker_name: str,
+    allow_model_download: bool = False,
+) -> _CrossEncoderReranker | _SkippedReranker:
+    """Prepare a reranker once for repeated local evaluation."""
+
+    if reranker_name not in _RERANKER_MODELS:
+        return _SkippedReranker(f"Unsupported reranker `{reranker_name}`.")
+    if os.getenv("CI", "").lower() == "true":
+        return _SkippedReranker(
+            f"`{reranker_name}` is disabled in CI to avoid model downloads during automated checks."
+        )
+
+    try:
+        return _CrossEncoderReranker(
+            reranker_name=reranker_name,
+            model_name=_RERANKER_MODELS[reranker_name],
+            allow_model_download=allow_model_download,
+        )
+    except ImportError:
+        return _SkippedReranker(
+            "Reranking requires the optional `sentence-transformers` dependency."
+        )
+    except Exception as exc:  # pragma: no cover - exact local cache errors vary by environment.
+        return _SkippedReranker(f"`{reranker_name}` could not be initialized locally: {exc}")
+
+
+def rerank_results(
+    *,
+    query: str,
+    results: pd.DataFrame,
+    top_k: int,
+    reranker_name: str,
+    allow_model_download: bool = False,
+    prepared_reranker: _CrossEncoderReranker | _SkippedReranker | None = None,
+) -> RagRerankRun:
+    """Rerank an existing candidate set without changing retrieval scope."""
+
+    started_at = time.perf_counter()
+    reranker = prepared_reranker or prepare_reranker(
+        reranker_name=reranker_name,
+        allow_model_download=allow_model_download,
+    )
+    if isinstance(reranker, _SkippedReranker):
+        return RagRerankRun(
+            reranker_name=reranker_name,
+            results=pd.DataFrame(columns=_result_columns()),
+            status="skipped",
+            reason=reranker.reason,
+            latency_ms=round((time.perf_counter() - started_at) * 1000, 3),
+        )
+
+    reranked = reranker.rerank(query=query, results=results, top_k=top_k)
+    return RagRerankRun(
+        reranker_name=reranker_name,
+        results=reranked,
+        status="ok",
+        reason=None,
+        latency_ms=round((time.perf_counter() - started_at) * 1000, 3),
+    )
+
+
 def _apply_metadata_filters(frame: pd.DataFrame, metadata_filters: dict[str, Any]) -> pd.DataFrame:
     if not metadata_filters:
         return frame.copy()
     mask = [_row_matches_filters(row, metadata_filters) for row in frame.to_dict(orient="records")]
     return frame.loc[mask].copy()
+
+
+def row_matches_filters(row: dict[str, Any], metadata_filters: dict[str, Any]) -> bool:
+    """Public wrapper for benchmark validation and inspection logic."""
+
+    return _row_matches_filters(row, metadata_filters)
 
 
 def _row_matches_filters(row: dict[str, Any], metadata_filters: dict[str, Any]) -> bool:
@@ -434,8 +570,13 @@ def _string_or_none(value: object) -> str | None:
 
 
 __all__ = [
+    "RagRerankRun",
     "RagSearchRun",
+    "available_reranker_names",
     "available_retriever_names",
     "prepare_retriever",
+    "prepare_reranker",
     "rag_search",
+    "rerank_results",
+    "row_matches_filters",
 ]
