@@ -141,7 +141,9 @@ def init_rag_benchmark(
 
     resolved_settings = settings or Settings()
     metadata = build_default_rag_benchmark_metadata(
-        corpus_manifest_path=str(resolved_settings.artifacts_dir / "rag" / "corpus" / "manifest.json"),
+        corpus_manifest_path=str(
+            resolved_settings.artifacts_dir / "rag" / "corpus" / "manifest.json"
+        ),
         authors=list(authors),
         notes=notes,
     )
@@ -253,9 +255,7 @@ def bootstrap_rag_judgments(
         candidate_frames.append(candidate)
 
     candidate_results = (
-        pd.concat(candidate_frames, ignore_index=True)
-        if candidate_frames
-        else pd.DataFrame()
+        pd.concat(candidate_frames, ignore_index=True) if candidate_frames else pd.DataFrame()
     )
     judgment_workspace = _build_judgment_workspace(candidate_results)
     working_dir = benchmark_dir.expanduser().resolve() / WORKING_DIRNAME
@@ -401,8 +401,10 @@ def adjudicate_rag_benchmark(
     benchmark_dir_resolved = benchmark_dir.expanduser().resolve()
     run_id = f"{_pack_name_from_dir(benchmark_dir)}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
     output_root = (
-        resolved_settings.artifacts_dir / DEFAULT_ADJUDICATION_SUBDIR / run_id
-    ).expanduser().resolve()
+        (resolved_settings.artifacts_dir / DEFAULT_ADJUDICATION_SUBDIR / run_id)
+        .expanduser()
+        .resolve()
+    )
     _ensure_non_analyst_artifact_root(output_root=output_root, settings=resolved_settings)
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -512,7 +514,9 @@ def summarize_rag_benchmark_authoring(
                 "query_text": query["query_text"],
                 "query_groups": sorted(set(query_group_map.get(query_id, []))) or ["(none)"],
                 "brand_filter_values": _split_multivalue_or_default(query.get("brand_filter", "")),
-                "metric_filter_values": _split_multivalue_or_default(query.get("metric_filter", "")),
+                "metric_filter_values": _split_multivalue_or_default(
+                    query.get("metric_filter", "")
+                ),
                 "publish_status_scope": query.get("publish_status_scope", "") or "all",
                 "expected_source_kind_values": _split_multivalue_or_default(
                     query.get("expected_source_kinds", "")
@@ -549,16 +553,22 @@ def summarize_rag_benchmark_authoring(
     }
 
     output_root = (
-        resolved_settings.artifacts_dir
-        / DEFAULT_AUTHORING_SUBDIR
-        / _pack_name_from_dir(benchmark_dir_resolved)
-    ).expanduser().resolve()
+        (
+            resolved_settings.artifacts_dir
+            / DEFAULT_AUTHORING_SUBDIR
+            / _pack_name_from_dir(benchmark_dir_resolved)
+        )
+        .expanduser()
+        .resolve()
+    )
     _ensure_non_analyst_artifact_root(output_root=output_root, settings=resolved_settings)
     output_root.mkdir(parents=True, exist_ok=True)
     coverage_rows_csv_path = output_root / "coverage_rows.csv"
     pd.DataFrame(summary["coverage_rows"]).to_csv(coverage_rows_csv_path, index=False)
     summary_json_path = output_root / "summary.json"
-    summary_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_json_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     summary_markdown_path = output_root / "summary.md"
     summary_markdown_path.write_text(
         _render_authoring_summary_markdown(summary),
@@ -727,10 +737,12 @@ def _normalize_reviewer_rows(
         else str(chunk_to_doc_id.get(str(row.get("chunk_id", "")).strip(), "")),
         axis=1,
     )
-    rows["must_appear_normalized"] = rows["must_appear_in_top_k"].fillna("").map(
-        lambda value: str(value).strip()
+    rows["must_appear_normalized"] = (
+        rows["must_appear_in_top_k"].fillna("").map(lambda value: str(value).strip())
     )
-    rows["rationale_normalized"] = rows["rationale"].fillna("").map(lambda value: str(value).strip())
+    rows["rationale_normalized"] = (
+        rows["rationale"].fillna("").map(lambda value: str(value).strip())
+    )
     return rows
 
 
