@@ -3,7 +3,8 @@
 - Benchmark dir: `data/rag_benchmarks/2026q2_pack`
 - Suggestions: `12`
 - Suggestions are deterministic review candidates only. They are not ground truth and they never overwrite `queries.csv`.
-- Final `queries.csv` and `judgments.csv` are intentionally blank in this starter pack.
+- `queries.csv` now contains the first `12`-query analyst batch copied from these suggestions on `2026-04-07`.
+- `judgments.csv` remains intentionally blank until real reviewer labeling begins.
 
 ## Group Counts
 
@@ -14,16 +15,16 @@
 
 ## Recommended First Pass
 
-- Review the five AUV contradiction suggestions first: Starbucks, Taco Bell, Raising Cane's, Dutch Bros, and Shake Shack.
-- Then review provenance-gap suggestions for McDonald's, Domino's, Chipotle, and Chick-fil-A.
+- The current batch already includes the five AUV contradiction suggestions first: Starbucks, Taco Bell, Raising Cane's, Dutch Bros, and Shake Shack.
+- It also includes provenance-gap suggestions for McDonald's, Domino's, Chipotle, and Chick-fil-A.
 - Keep the cross-sheet `Sweetgreen` lookup in the pack because it is already grounded in the current validation summary.
-- Copy only approved rows into `queries.csv`; leave everything else in `working/`.
+- Use this file as the historical seed source for future additions; do not treat it as a judgment file.
 
 ## Draft Suggestions
 
-- `starter-starbucks-auv-contradiction`: What current vetted evidence explains Starbucks auv and the implied-AUV mismatch? (Current validation output records a 38.9% implied-AUV contradiction and reconciliation still shows no external coverage.)
-- `starter-taco-bell-auv-contradiction`: What current vetted evidence explains Taco Bell auv and the implied-AUV mismatch? (Current validation output records a Taco Bell AUV contradiction and reconciliation still shows no external coverage.)
-- `starter-raising-canes-auv-contradiction`: What current vetted evidence explains Raising Cane's auv and the implied-AUV mismatch? (Current validation output records a Raising Cane's AUV contradiction and reconciliation still shows no external coverage.)
+- `starter-starbucks-auv-contradiction`: What current vetted evidence explains Starbucks auv and the implied-AUV mismatch? (Current validation output still records a 38.9% implied-AUV contradiction even after the first external QSR 50 row landed.)
+- `starter-taco-bell-auv-contradiction`: What current vetted evidence explains Taco Bell auv and the implied-AUV mismatch? (Current validation output still records a Taco Bell AUV contradiction even after the first external QSR 50 row landed.)
+- `starter-raising-canes-auv-contradiction`: What current vetted evidence explains Raising Cane's auv and the implied-AUV mismatch? (Current validation output still records a Raising Cane's AUV contradiction even after the first external QSR 50 row landed.)
 - `starter-dutch-bros-auv-contradiction`: What current vetted evidence explains Dutch Bros auv and the implied-AUV mismatch? (Current validation output records a Dutch Bros AUV contradiction and reconciliation still shows no external coverage.)
 - `starter-shake-shack-auv-contradiction`: What current vetted evidence explains Shake Shack auv and the implied-AUV mismatch? (Current validation output records a Shake Shack AUV contradiction and reconciliation still shows no external coverage.)
 - `starter-mcdonalds-system-sales-gap`: What provenance is currently attached to McDonald's system_sales, and what external evidence is still missing? (McDonald's is a high-visibility anchor brand and still has no external reconciliation coverage for system sales.)

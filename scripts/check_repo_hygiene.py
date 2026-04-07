@@ -23,13 +23,12 @@ ALLOWED_TRACKED = {
     "reports/.gitkeep",
     "strategy/.gitkeep",
 }
-ALLOWED_PREFIXES = ("data/reference/templates/",)
+ALLOWED_PREFIXES = ("data/reference/",)
 FORBIDDEN_PREFIXES = (
     "data/raw/",
     "data/bronze/",
     "data/silver/",
     "data/gold/",
-    "data/reference/",
     "reports/",
     "strategy/",
     "artifacts/",

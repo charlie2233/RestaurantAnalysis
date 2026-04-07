@@ -1,1 +1,13 @@
 query_id,query_group,notes
+starter-starbucks-auv-contradiction,brand_metric_lookup,Approved for the first analyst batch on 2026-04-07.
+starter-taco-bell-auv-contradiction,brand_metric_lookup,Approved for the first analyst batch on 2026-04-07.
+starter-raising-canes-auv-contradiction,brand_metric_lookup,Approved for the first analyst batch on 2026-04-07.
+starter-dutch-bros-auv-contradiction,brand_metric_lookup,Approved for the first analyst batch on 2026-04-07.
+starter-shake-shack-auv-contradiction,brand_metric_lookup,Approved for the first analyst batch on 2026-04-07.
+starter-mcdonalds-system-sales-gap,provenance_citation,Approved for the first analyst batch on 2026-04-07.
+starter-mcdonalds-store-count-gap,provenance_citation,Approved for the first analyst batch on 2026-04-07.
+starter-dominos-system-sales-gap,provenance_citation,Approved for the first analyst batch on 2026-04-07.
+starter-chipotle-store-count-gap,provenance_citation,Approved for the first analyst batch on 2026-04-07.
+starter-chick-fil-a-auv-gap,provenance_citation,Approved for the first analyst batch on 2026-04-07.
+starter-sweetgreen-extra-ai-row,cross_sheet_audit,Approved for the first analyst batch on 2026-04-07.
+starter-priority-evidence-gap-scan,cross_brand_comparison,Approved for the first analyst batch on 2026-04-07.

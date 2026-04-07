@@ -78,3 +78,21 @@ def test_check_repo_hygiene_ignores_legitimate_urls(
     assert module.main() == 0
     captured = capsys.readouterr()
     assert "passed" in captured.out
+
+
+def test_check_repo_hygiene_allows_committed_reference_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_hygiene_module()
+    tracked_file = tmp_path / "data" / "reference" / "qsr50_reference.csv"
+    tracked_file.parent.mkdir(parents=True, exist_ok=True)
+    tracked_file.write_text("brand_name,source_name\nStarbucks,QSR 50 2025\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "_tracked_files", lambda: ["data/reference/qsr50_reference.csv"])
+
+    assert module.main() == 0
+    captured = capsys.readouterr()
+    assert "passed" in captured.out
