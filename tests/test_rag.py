@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 from qsr_audit.cli import app
@@ -22,6 +23,7 @@ from qsr_audit.rag import (
     validate_rag_reviewer_file,
 )
 from qsr_audit.rag.authoring import bootstrap_rag_judgments
+from qsr_audit.rag.authoring_assist import _coerce_list
 from typer.testing import CliRunner
 
 from tests.helpers import build_settings
@@ -1527,6 +1529,149 @@ def test_seed_rag_queries_is_deterministic_and_preserves_queries_csv(tmp_path: P
     assert first.artifacts.suggested_queries_csv_path.exists()
     assert first.artifacts.suggested_queries_markdown_path.exists()
     assert "needs_human_review" in first.suggestions.columns
+
+
+def test_coerce_list_treats_missing_scalars_as_empty() -> None:
+    assert _coerce_list(np.nan) == []
+    assert _coerce_list(float("nan")) == []
+    assert _coerce_list(pd.NA) == []
+
+
+def test_coerce_list_drops_missing_items_from_lists_and_json_lists() -> None:
+    assert _coerce_list(["Domino's", np.nan, "", pd.NA]) == ["Domino's"]
+    assert _coerce_list('["Domino\'s", null, "", "nan", "Taco Bell"]') == [
+        "Domino's",
+        "Taco Bell",
+    ]
+
+
+def test_mine_rag_hard_negatives_ignores_sparse_brand_and_metric_metadata(
+    tmp_path: Path,
+) -> None:
+    settings = build_settings(tmp_path)
+    benchmark_dir = tmp_path / "benchmark-pack"
+    _write_benchmark_pack(benchmark_dir)
+    run_dir = settings.artifacts_dir / "rag" / "benchmarks" / "sparse-metadata-run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "benchmark_queries.json").write_text(
+        json.dumps(
+            [
+                {
+                    "query_id": "blocked-kpi",
+                    "query": "Which Taco Bell KPI rows are blocked for external export?",
+                    "metadata_filters": {"publish_status": "blocked"},
+                    "brand_filter_values": ["Taco Bell"],
+                    "metric_filter_values": ["auv"],
+                    "expected_source_kinds": ["gold_publish_decision"],
+                    "publish_status_scope": "blocked",
+                    "ambiguity_flag": False,
+                    "requires_citation": True,
+                    "query_buckets": ["brand_specific"],
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        [
+            {
+                "query_id": "blocked-kpi",
+                "query_text": "Which Taco Bell KPI rows are blocked for external export?",
+                "run_label": "bm25",
+                "retriever_name": "bm25",
+                "stage": "retrieval",
+                "reranker_name": "",
+                "status": "warning",
+                "status_reason": "Not all judged targets were retrieved in the top-k.",
+                "recall_at_k": 0.0,
+                "mrr": 0.0,
+                "ndcg_at_k": 0.0,
+                "citation_precision": 1.0,
+                "metadata_filter_correctness": 1.0,
+                "latency_ms": 1.0,
+                "failure_source": "retrieval",
+                "query_buckets": ["brand_specific"],
+                "ambiguity_flag": False,
+                "judged_relevant_count": 1,
+                "must_appear_violation_count": 1,
+                "index_size_bytes": 193,
+            }
+        ]
+    ).to_json(run_dir / "per_query_metrics.json", orient="records", force_ascii=False, indent=2)
+    pd.DataFrame(
+        [
+            {
+                "query_id": "blocked-kpi",
+                "query_text": "Which Taco Bell KPI rows are blocked for external export?",
+                "run_label": "bm25",
+                "stage": "retrieval",
+                "reranker_name": "",
+                "retriever_name": "bm25",
+                "rank": 1,
+                "score": 6.0,
+                "doc_id": "sparse-doc",
+                "chunk_id": "sparse-doc::chunk-001",
+                "source_kind": "gold_publish_decision",
+                "title": "Sparse row",
+                "text": "Blocked KPI row with sparse metadata.",
+                "artifact_path": "data/gold/gold_publish_decisions.parquet",
+                "brand_names": np.nan,
+                "metric_names": pd.NA,
+                "as_of_date": "2024-12-31",
+                "publish_status": "blocked",
+                "confidence_score": 0.4,
+                "source_name": "QSR 50",
+                "source_url_or_doc_id": "doc-sparse",
+                "metadata_json": "{}",
+                "filter_match": True,
+                "citation_present": True,
+                "is_relevant": False,
+                "relevance_label": "not_relevant",
+                "metadata_filters_json": json.dumps({"publish_status": "blocked"}),
+                "query_latency_ms": 1.0,
+                "failure_source": "retrieval",
+                "query_buckets_json": json.dumps(["brand_specific"]),
+            }
+        ]
+    ).to_parquet(run_dir / "per_query_results.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "retriever_name": "bm25",
+                "run_label": "bm25",
+                "stage": "retrieval",
+                "status": "warning",
+                "query_count": "1",
+                "judged_query_count": "1",
+                "recall_at_k": "0.0",
+                "mrr": "0.0",
+                "ndcg_at_k": "0.0",
+                "citation_precision": "1.0",
+                "metadata_filter_correctness": "1.0",
+                "latency_ms": "1.0",
+                "index_size_bytes": "193",
+            }
+        ]
+    ).to_csv(run_dir / "metrics.csv", index=False)
+
+    run = mine_rag_hard_negatives(
+        benchmark_dir=benchmark_dir,
+        run_dir=run_dir,
+        settings=settings,
+    )
+
+    assert run.suggestions.empty
+    assert run.summary["suggestion_count"] == 0
+
+    triage_run = summarize_rag_failures(
+        benchmark_dir=benchmark_dir,
+        run_dir=run_dir,
+        settings=settings,
+    )
+
+    assert triage_run.summary["bucket_counts"] == [{"value": "retrieval miss", "count": 1}]
 
 
 def test_mine_rag_hard_negatives_finds_controlled_near_miss(tmp_path: Path) -> None:

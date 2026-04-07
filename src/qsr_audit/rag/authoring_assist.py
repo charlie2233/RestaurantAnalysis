@@ -1027,11 +1027,11 @@ def _ensure_non_analyst_artifact_root(path: Path, *, settings: Settings) -> None
 
 
 def _coerce_list(value: Any) -> list[str]:
-    if value is None:
+    if _is_missing_scalar(value):
         return []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    text = str(value).strip()
+    if isinstance(value, list | tuple):
+        return [cleaned for item in value if (cleaned := _clean(item))]
+    text = _clean(value)
     if not text:
         return []
     if text.startswith("[") and text.endswith("]"):
@@ -1040,9 +1040,9 @@ def _coerce_list(value: Any) -> list[str]:
         except json.JSONDecodeError:
             parsed = None
         if isinstance(parsed, list):
-            return [str(item).strip() for item in parsed if str(item).strip()]
+            return [cleaned for item in parsed if (cleaned := _clean(item))]
     if "|" in text:
-        return [item.strip() for item in text.split("|") if item.strip()]
+        return [cleaned for item in text.split("|") if (cleaned := _clean(item))]
     return [text]
 
 
@@ -1056,10 +1056,23 @@ def _slugify_identifier(value: str) -> str:
 
 
 def _clean(value: Any) -> str:
-    if value is None:
+    if _is_missing_scalar(value):
         return ""
     text = str(value).strip()
-    return "" if text.lower() == "nan" else text
+    return "" if text.lower() in {"nan", "<na>"} else text
+
+
+def _is_missing_scalar(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, list | tuple | set | dict):
+        return False
+    if isinstance(value, str):
+        return not value.strip() or value.strip().lower() in {"nan", "<na>"}
+    try:
+        return bool(pd.isna(value))
+    except TypeError:
+        return False
 
 
 def _parse_bool(value: Any) -> bool:
