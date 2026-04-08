@@ -88,6 +88,7 @@ make run-full-audit
 
 - Contributor workflow: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Analyst workflow and interpretation guide: [`docs/analyst-runbook.md`](docs/analyst-runbook.md)
+- 5-brand demo walkthrough: [`docs/demo-walkthrough.md`](docs/demo-walkthrough.md)
 - Dataset and field definitions: [`docs/data-dictionary.md`](docs/data-dictionary.md)
 - CLI reference: [`docs/cli.md`](docs/cli.md)
 - Local developer workflow: [`docs/local-workflow.md`](docs/local-workflow.md)
@@ -101,6 +102,48 @@ Reference ingestion is intentionally manual-first. Populate local CSVs in `data/
 using the committed templates in `data/reference/templates/` rather than scraping unstable
 or paid sources automatically. Missing reference coverage is surfaced explicitly during
 reconciliation; it is never treated as silent confirmation.
+
+## 5-brand happy-path demo
+
+This repo includes a focused five-brand showcase built from the happy-path artifacts
+introduced by PR #15. It is meant to be easy to run, easy to inspect, and easy to share.
+
+Run the demo and package the review bundle:
+
+```bash
+qsr-audit demo-happy-path --input data/raw/<workbook>.xlsx --reference-dir data/reference/
+qsr-audit package-demo
+# or: make demo-bundle
+```
+
+The demo slice includes these five brands:
+
+- Starbucks
+- Taco Bell
+- Raising Cane's
+- Dutch Bros
+- Shake Shack
+
+What the demo proves:
+
+- The five-brand happy-path slice can be ingested, validated, reconciled, and summarized.
+- The demo hub surfaces publishability, provenance, invariant failures, and syntheticness review signals.
+- The bundle collects the review-facing outputs into a single shareable artifact directory under `artifacts/demo_bundle/`.
+
+What the demo does not prove:
+
+- It does not establish full-workbook readiness.
+- It does not validate brands outside the five-brand happy-path slice.
+- It does not collapse publishable, advisory, and blocked rows into a single approval signal.
+- It does not replace the workbook-level validation and reconciliation workflow.
+
+Primary demo artifacts:
+
+- [`reports/demo/index.html`](reports/demo/index.html) - static demo hub with the five-brand summary and links to the supporting outputs.
+- [`reports/validation/core_scorecard.html`](reports/validation/core_scorecard.html) - row-level validation and publishability scorecard.
+- [`reports/reconciliation/brand_deltas.csv`](reports/reconciliation/brand_deltas.csv) - metric-by-metric reconciliation deltas and provenance fields.
+- [`reports/summary/top_risks.md`](reports/summary/top_risks.md) - concise risk summary for reviewers.
+- [`artifacts/demo_bundle/`](artifacts/demo_bundle/) - packaged copy of the shareable demo outputs.
 
 ## Next implementation steps
 

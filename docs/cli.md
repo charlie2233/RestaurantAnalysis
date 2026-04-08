@@ -74,6 +74,37 @@
   - `artifacts/release/preflight_summary.json`
   - `artifacts/release/preflight_summary.md`
 
+### `qsr-audit demo-happy-path`
+
+- Purpose: run the fixed five-brand slice from workbook ingest through validation, syntheticness, reconciliation, and Gold decision outputs.
+- Scope:
+  - covers only Starbucks, Taco Bell, Raising Cane's, Dutch Bros, and Shake Shack
+  - generates a screenshot-friendly hub, but does not claim full-workbook readiness
+- Primary outputs:
+  - `reports/demo/index.html`
+  - `reports/validation/core_scorecard.html`
+  - `reports/reconciliation/brand_deltas.csv`
+  - `reports/summary/top_risks.md`
+  - `data/gold/demo_gold.parquet`
+  - `data/gold/demo_syntheticness.parquet`
+
+### `qsr-audit package-demo`
+
+- Purpose: run the five-brand happy-path demo and package the resulting showcase artifacts into a shareable bundle.
+- Guardrails:
+  - keeps `publishable`, `advisory`, and `blocked` rows distinct in the hub
+  - writes the bundle under `artifacts/demo_bundle/`, not under analyst-facing `reports/` or `strategy/` bundle paths
+  - remains a reviewer demo surface, not a release-readiness claim
+- Primary outputs:
+  - `reports/demo/index.html`
+  - `artifacts/demo_bundle/reports/demo/index.html`
+  - `artifacts/demo_bundle/reports/validation/core_scorecard.html`
+  - `artifacts/demo_bundle/reports/reconciliation/brand_deltas.csv`
+  - `artifacts/demo_bundle/reports/summary/top_risks.md`
+  - `artifacts/demo_bundle/data/gold/demo_gold.parquet`
+  - `artifacts/demo_bundle/data/gold/demo_syntheticness.parquet`
+  - `artifacts/demo_bundle/demo_bundle_manifest.json`
+
 ### `qsr-audit snapshot-gold --as-of-date YYYY-MM-DD`
 
 - Purpose: retain a dated, forecast-ready snapshot of current Gold publish decisions and the safe KPI subset.
