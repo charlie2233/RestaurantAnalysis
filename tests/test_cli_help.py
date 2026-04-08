@@ -40,6 +40,7 @@ from typer.testing import CliRunner
                 "rag-search",
                 "preflight-release",
                 "demo-happy-path",
+                "package-demo",
                 "report",
             ],
         ),
@@ -81,6 +82,14 @@ from typer.testing import CliRunner
                 "five-brand demo slice",
                 "final demo scorecard outputs",
                 "reference directory override",
+            ],
+        ),
+        (
+            ["package-demo", "--help"],
+            [
+                "shareable artifact directory",
+                "five-brand demo outputs",
+                "Bundle",
             ],
         ),
         (

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 import pandas as pd
 import pytest
 from qsr_audit.cli import app
@@ -293,6 +295,7 @@ def test_demo_happy_path_command_end_to_end_without_arguments(
     assert result.exit_code == 0, result.stdout
     assert "Five-brand happy-path demo complete" in result.stdout
     assert (settings.reports_dir / "validation" / "core_scorecard.html").exists()
+    assert (settings.reports_dir / "demo" / "index.html").exists()
     assert (settings.reports_dir / "reconciliation" / "brand_deltas.csv").exists()
     assert (settings.reports_dir / "summary" / "top_risks.md").exists()
     assert (settings.data_gold / "demo_gold.parquet").exists()
@@ -322,18 +325,31 @@ def test_demo_happy_path_command_end_to_end(tmp_path, monkeypatch: pytest.Monkey
     assert "Five-brand happy-path demo complete" in result.stdout
 
     core_scorecard = settings.reports_dir / "validation" / "core_scorecard.html"
+    demo_hub = settings.reports_dir / "demo" / "index.html"
     brand_deltas = settings.reports_dir / "reconciliation" / "brand_deltas.csv"
     top_risks = settings.reports_dir / "summary" / "top_risks.md"
     demo_gold = settings.data_gold / "demo_gold.parquet"
     demo_syntheticness = settings.data_gold / "demo_syntheticness.parquet"
 
-    for path in (core_scorecard, brand_deltas, top_risks, demo_gold, demo_syntheticness):
+    for path in (core_scorecard, demo_hub, brand_deltas, top_risks, demo_gold, demo_syntheticness):
         assert path.exists()
 
     scorecard_html = core_scorecard.read_text(encoding="utf-8")
     assert "Five-Brand Happy-Path Demo" in scorecard_html
     assert "Publish recommendation" in scorecard_html
     assert "Syntheticness score" in scorecard_html
+
+    demo_hub_html = html.unescape(demo_hub.read_text(encoding="utf-8"))
+    assert "Five-brand happy-path demo" in demo_hub_html
+    assert "Publishability Summary" in demo_hub_html
+    assert "Reconciliation Provenance Summary" in demo_hub_html
+    assert "Top Invariant Failures" in demo_hub_html
+    assert "Syntheticness Review Summary" in demo_hub_html
+    for brand in DEMO_BRANDS:
+        assert brand in demo_hub_html
+    assert "../validation/core_scorecard.html" in demo_hub_html
+    assert "../reconciliation/brand_deltas.csv" in demo_hub_html
+    assert "../summary/top_risks.md" in demo_hub_html
 
     deltas_frame = pd.read_csv(brand_deltas)
     assert len(deltas_frame.index) == len(DEMO_BRANDS) * 4
@@ -365,6 +381,52 @@ def test_demo_happy_path_command_end_to_end(tmp_path, monkeypatch: pytest.Monkey
     assert "# Top Risks" in top_risks_text
     assert "Largest Reconciliation Deltas" in top_risks_text
     assert "Publishability Risks" in top_risks_text
+
+
+def test_package_demo_command_creates_shareable_bundle(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = build_settings(tmp_path)
+    workbook_path = settings.data_raw / "demo_fixture.xlsx"
+    _write_demo_workbook(workbook_path)
+    _write_qsr50_reference_csv(settings.data_reference / "qsr50_reference.csv")
+    _set_settings_env(monkeypatch, settings)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "package-demo",
+            "--input",
+            str(workbook_path),
+            "--reference-dir",
+            str(settings.data_reference),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "Five-brand demo bundle created" in result.stdout
+
+    bundle_root = settings.artifacts_dir / "demo_bundle"
+    expected_bundle_files = [
+        bundle_root / "reports" / "demo" / "index.html",
+        bundle_root / "reports" / "validation" / "core_scorecard.html",
+        bundle_root / "reports" / "reconciliation" / "brand_deltas.csv",
+        bundle_root / "reports" / "summary" / "top_risks.md",
+        bundle_root / "data" / "gold" / "demo_gold.parquet",
+        bundle_root / "data" / "gold" / "demo_syntheticness.parquet",
+        bundle_root / "demo_bundle_manifest.json",
+    ]
+    for path in expected_bundle_files:
+        assert path.exists()
+
+    bundle_hub_html = html.unescape(
+        (bundle_root / "reports" / "demo" / "index.html").read_text(encoding="utf-8")
+    )
+    assert "Five-brand happy-path demo" in bundle_hub_html
+    assert "Demo hub for reviewer-friendly packaging" in bundle_hub_html
+    assert bundle_root.is_relative_to(settings.artifacts_dir)
+    assert not (settings.reports_dir / "demo_bundle").exists()
 
 
 def test_demo_happy_path_zero_arg_mode_fails_cleanly_when_workbook_discovery_is_ambiguous(
