@@ -1,6 +1,6 @@
 # 2026q2_pack Checklist
 
-- [ ] `queries.csv` remains empty until a human explicitly approves candidate rows from `working/suggested_queries.csv`.
+- [ ] `queries.csv` contains only the current first-cycle reviewer batch, and any additional rows are copied from `working/suggested_queries.csv` only after explicit analyst review.
 - [ ] `judgments.csv` remains empty until real evidence review begins.
 - [ ] Corpus was built from vetted Gold and provenance-aware local artifacts.
 - [ ] No raw workbook, Bronze, or Silver evidence is referenced.
