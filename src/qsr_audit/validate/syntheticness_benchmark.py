@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import fmean
-from typing import Any, Sequence
+from typing import Any
 
 from qsr_audit.config import Settings
-from qsr_audit.reporting.scorecards import _syntheticness_summary
+from qsr_audit.syntheticness_interpretation import (
+    SYNTHETICNESS_INTERPRETATION_VERSION,
+    interpret_syntheticness_signals,
+)
 from qsr_audit.validate.syntheticness_reporting import SyntheticnessSignal
 
 BENCHMARK_ID = "syntheticness-interpretation-benchmark-v1"
-BENCHMARK_SCORING_VERSION = "syntheticness-interpretation-v1"
+BENCHMARK_SCORING_VERSION = SYNTHETICNESS_INTERPRETATION_VERSION
 DEFAULT_BENCHMARK_ROOT = Path("artifacts/syntheticness")
 
 
@@ -234,11 +238,11 @@ def render_syntheticness_benchmark_summary(metrics: dict[str, Any]) -> str:
 
 
 def _evaluate_case(case: SyntheticnessBenchmarkCase) -> dict[str, Any]:
-    summary = _syntheticness_summary([asdict(signal) for signal in case.signals])
-    observed_score = int(summary["syntheticness_score"])
-    observed_review_required = bool(summary["review_required"])
-    supporting_signals = list(summary["supporting_signals"])
-    caveats = list(summary["caveats"])
+    interpretation = interpret_syntheticness_signals([asdict(signal) for signal in case.signals])
+    observed_score = int(interpretation.syntheticness_score)
+    observed_review_required = bool(interpretation.review_required)
+    supporting_signals = list(interpretation.supporting_signals)
+    caveats = list(interpretation.caveats)
     passed = (
         observed_score == case.expected_score
         and observed_review_required == case.expected_review_required
@@ -278,7 +282,9 @@ def _build_benchmark_metrics(case_results: Sequence[dict[str, Any]]) -> dict[str
         "case_count": case_count,
         "passed_case_count": passed_case_count,
         "failed_case_count": case_count - passed_case_count,
-        "review_required_agreement_rate": review_required_matches / case_count if case_count else 0.0,
+        "review_required_agreement_rate": review_required_matches / case_count
+        if case_count
+        else 0.0,
         "mean_observed_score": fmean(observed_scores) if observed_scores else 0.0,
         "mean_expected_score": fmean(expected_scores) if expected_scores else 0.0,
         "mean_absolute_score_error": fmean(abs_errors) if abs_errors else 0.0,
