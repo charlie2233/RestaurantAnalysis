@@ -9,6 +9,12 @@
 - [ ] Reviewer files live under paths such as `reviewers/alice/judgments.csv`
       and `reviewers/bob/judgments.csv`, and they do not overwrite
       `judgments.csv`.
+- [ ] Reviewers label with `doc_id` or `chunk_id`, valid `relevance_label`
+      values (`highly_relevant`, `relevant`, `not_relevant`), an evidence-based
+      `rationale`, and `must_appear_in_top_k` only when a hard placement
+      requirement exists.
+- [ ] Reviewer files stay in `draft` / provisional state until each reviewer has
+      filled the exact query set and the disagreements have been adjudicated.
 - [ ] At least two reviewers participate before any pack is treated as truly adjudicated.
 - [ ] Reviewer conflicts were adjudicated before treating the benchmark as final.
 - [ ] Benchmark outputs are kept under `artifacts/rag/...`, not `reports/` or `strategy/`.

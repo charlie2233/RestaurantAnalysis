@@ -30,6 +30,26 @@ provisional until two real reviewers complete the benchmark loop.
 - Keep draft or provisional judgments clearly marked until both reviewers have
   completed their pass and the disagreements have been adjudicated.
 
+## Exact reviewer labeling
+
+- Review one query at a time against the vetted corpus and the bootstrap workspace.
+- For each positive judgment, fill either `doc_id` or `chunk_id`. Use `chunk_id`
+  when the exact chunk matters; use `doc_id` when the whole document is the
+  right retrieval target.
+- Use only these `relevance_label` values:
+  - `highly_relevant`: the row directly answers the lookup and should usually be
+    easy to surface near the top.
+  - `relevant`: the row contributes useful grounded evidence but is not the best
+    direct answer on its own.
+  - `not_relevant`: the row is a reviewed hard negative for this query.
+- Fill `rationale` with an evidence-backed note about why the row is relevant or
+  not relevant. Do not restate the query without tying it to the artifact.
+- Fill `must_appear_in_top_k` only when the row is important enough to require a
+  top-k placement. Leave it blank when there is no hard placement requirement.
+- Keep `review_state` as `draft` until the reviewer has finished the full file.
+- Do not backfill `judgments.csv` at the pack root until both reviewer files are
+  complete and the disagreements have been adjudicated.
+
 ## First-cycle focus
 
 The batch covers the high-friction evidence lookups already surfaced by the repo:
@@ -55,4 +75,3 @@ qsr-audit eval-rag-retrieval --benchmark-dir data/rag_benchmarks/2026q2_pack --r
 
 Generated workflow artifacts belong under `artifacts/rag/...`. Source benchmark
 pack files stay under `data/rag_benchmarks/...`.
-

@@ -233,7 +233,7 @@ def eval_rag_retrieval(
                     reranker_name=None,
                 )
             )
-            if retrieval_metric["status"] != "ok":
+            if _is_failure_case_metric(retrieval_metric):
                 failure_cases.append(_failure_case_from_metric(retrieval_metric))
 
             if not reranker_name:
@@ -316,7 +316,7 @@ def eval_rag_retrieval(
                     reranker_name=reranker_name,
                 )
             )
-            if reranked_metric["status"] != "ok":
+            if _is_failure_case_metric(reranked_metric):
                 failure_cases.append(_failure_case_from_metric(reranked_metric))
 
         metrics_rows.append(
@@ -828,7 +828,7 @@ def _load_query_specs(
 
 
 def _normalize_query_specs_for_retrieval_eval(
-    query_specs: list[dict[str, Any]]
+    query_specs: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Ensure benchmark-directory query specs can flow through retrieval scoring."""
 
@@ -1357,6 +1357,12 @@ def _failure_case_from_metric(metric: dict[str, Any]) -> dict[str, Any]:
         "query_buckets": metric["query_buckets"],
         "ambiguity_flag": metric["ambiguity_flag"],
     }
+
+
+def _is_failure_case_metric(metric: dict[str, Any]) -> bool:
+    if metric["status"] == "ok":
+        return False
+    return int(metric.get("judged_relevant_count") or 0) > 0
 
 
 def _skipped_metrics_row(
