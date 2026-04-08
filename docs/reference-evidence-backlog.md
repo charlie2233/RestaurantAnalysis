@@ -5,8 +5,8 @@ not evidence itself.
 
 Current local context:
 
-- `reports/reconciliation/reconciliation_summary.md` shows `3` of `30` brands
-  with external reference coverage after the first QSR 50 intake batch.
+- `reports/reconciliation/reconciliation_summary.md` shows `5` of `30` brands
+  with external reference coverage after the current QSR 50 demo batch.
 - `reports/audit/gold_publish_scorecard.md` now shows `2` publishable KPI rows,
   `62` advisory rows, and `116` blocked rows.
 - `reports/validation/validation_summary.md` shows five AUV contradiction
@@ -25,13 +25,15 @@ mark `reported` vs `estimated`, and do not infer missing values.
 | Starbucks | `data/reference/qsr50_reference.csv` | External QSR 50 row is now attached, but the evidence is marked `estimated`, `store_count` remains advisory, and `system_sales` / `auv` are still blocked. |
 | Taco Bell | `data/reference/qsr50_reference.csv` | External QSR 50 row is now attached; `store_count` is publishable, while `system_sales` and `auv` still need stronger follow-up. |
 | Raising Cane's | `data/reference/qsr50_reference.csv` | External QSR 50 row is now attached; `system_sales` is publishable, while `store_count` and `auv` remain blocked. |
+| Dutch Bros | `data/reference/qsr50_reference.csv` | External QSR 50 row is now attached; all four KPI fields have first-pass external coverage, but rank / `store_count` / `system_sales` still fail reconciliation thresholds and `auv` still needs corroboration. |
+| Shake Shack | `data/reference/qsr50_reference.csv` | External QSR 50 row is now attached as `estimated`; all four KPI fields now have first-pass external coverage, but estimated evidence plus large reconciliation deltas still keep them out of publishable status. |
 
 ## Top 10 Active Gaps
 
 | Priority | Brand | Metric | Expected source type | Why now | Current blocker |
 |---|---|---|---|---|---|
-| P0 | Dutch Bros | `auv` | `sec_filings_reference` | Local validation shows a 17.1% implied-AUV mismatch and no external coverage. | No populated manual reference row exists locally; current provenance is workbook-only. |
-| P0 | Shake Shack | `auv` | `sec_filings_reference` | Local validation shows an 81.8% implied-AUV mismatch and no external coverage. | No populated manual reference row exists locally; contradiction is severe enough to block external use. |
+| P0 | Dutch Bros | `auv` | `sec_filings_reference` | Local validation still shows a 17.1% implied-AUV mismatch after the QSR 50 row landed. | QSR 50 now supplies first-pass evidence, but a corroborating second source is still required before the contradiction can clear Gold publication. |
+| P0 | Shake Shack | `auv` | `sec_filings_reference` | Local validation still shows an 81.8% implied-AUV mismatch after the QSR 50 row landed. | QSR 50 now supplies first-pass evidence, but the evidence is estimated and the contradiction remains too severe for release-safe use. |
 | P1 | McDonald's | `system_sales` | `sec_filings_reference` | McDonald's is a high-visibility anchor brand and system sales is an external-facing KPI. | No populated manual reference row exists locally; reconciliation still reports missing evidence. |
 | P1 | McDonald's | `store_count` | `sec_filings_reference` | Store count is a likely first publishable KPI once external evidence is attached. | No populated manual reference row exists locally; reconciliation still reports missing evidence. |
 | P1 | Domino's | `system_sales` | `sec_filings_reference` | Domino's has no current AUV contradiction, so system sales is a good clean-gap evidence target. | No populated manual reference row exists locally; workbook-only provenance remains. |

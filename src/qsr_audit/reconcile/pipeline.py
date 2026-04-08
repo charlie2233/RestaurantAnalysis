@@ -23,6 +23,9 @@ from qsr_audit.reconcile.reconciliation import (
     select_best_reference_row,
 )
 from qsr_audit.reconcile.reference_audit import (
+    REFERENCE_FILE_SOURCE_TYPES as REFERENCE_AUDIT_FILE_SOURCE_TYPES,
+)
+from qsr_audit.reconcile.reference_audit import (
     REFERENCE_METRIC_COLUMNS as REFERENCE_AUDIT_METRIC_COLUMNS,
 )
 from qsr_audit.reconcile.reference_audit import (
@@ -398,6 +401,11 @@ def standardize_reference_frame(
         canonical_name = (
             _clean_optional_text(row.get("canonical_brand_name")) or resolution.canonical_brand_name
         )
+        source_type = (
+            _clean_optional_text(row.get("source_type"))
+            or REFERENCE_AUDIT_FILE_SOURCE_TYPES.get(source_file_name)
+            or "unknown"
+        )
 
         standardized_rows.append(
             {
@@ -406,7 +414,7 @@ def standardize_reference_frame(
                 "brand_match_confidence": resolution.match_confidence,
                 "brand_match_method": resolution.match_method,
                 "source_file_name": source_file_name,
-                "source_type": _clean_optional_text(row.get("source_type")) or "unknown",
+                "source_type": source_type,
                 "source_name": _clean_optional_text(row.get("source_name")),
                 "source_url_or_doc_id": _clean_optional_text(row.get("source_url_or_doc_id")),
                 "as_of_date": _clean_optional_text(row.get("as_of_date")),
