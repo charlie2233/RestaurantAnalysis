@@ -163,8 +163,28 @@ def test_run_syntheticness_writes_expected_outputs(tmp_path: Path) -> None:
     )
 
     signals = pd.read_parquet(run.artifacts.signals_parquet)
-    assert "signal_type" in signals.columns
-    assert "plain_english" in signals.columns
+    assert list(signals.columns) == [
+        "signal_type",
+        "title",
+        "plain_english",
+        "strength",
+        "dataset",
+        "field_name",
+        "method",
+        "sample_size",
+        "score",
+        "benchmark",
+        "p_value",
+        "z_score",
+        "threshold",
+        "observed",
+        "expected",
+        "interpretation",
+        "caveat",
+        "details",
+    ]
+    assert not signals.empty
+    assert {"signal_type", "plain_english", "caveat"}.issubset(signals.columns)
 
 
 def test_cli_run_syntheticness_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

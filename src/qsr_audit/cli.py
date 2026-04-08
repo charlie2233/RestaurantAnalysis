@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 
 from qsr_audit.config import get_settings
+from qsr_audit.demo import run_demo_happy_path as run_demo_happy_path_pipeline
 from qsr_audit.forecasting import build_forecast_panel as build_forecast_panel_pipeline
 from qsr_audit.forecasting import forecast_baselines as forecast_baselines_pipeline
 from qsr_audit.forecasting import snapshot_gold_history as snapshot_gold_history_pipeline
@@ -127,6 +128,18 @@ InputWorkbookOption = Annotated[
     ),
 ]
 
+OptionalInputWorkbookOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--input",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        path_type=Path,
+        help="Optional workbook override for the five-brand happy-path demo.",
+    ),
+]
+
 ValidationInputOption = Annotated[
     Path,
     typer.Option(
@@ -180,6 +193,19 @@ ReferenceDirOption = Annotated[
         readable=True,
         path_type=Path,
         help="Directory containing manual reference CSV files and templates.",
+    ),
+]
+
+OptionalReferenceDirOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--reference-dir",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        path_type=Path,
+        help="Optional reference directory override for the five-brand happy-path demo.",
     ),
 ]
 
@@ -1430,6 +1456,71 @@ def preflight_release_command() -> None:
     console.print(f"Audit log: {audit_log_path}")
     if not run.passed:
         raise typer.Exit(code=1)
+
+
+@app.command("demo-happy-path")
+def demo_happy_path_command(
+    input_path: OptionalInputWorkbookOption = None,
+    reference_dir: OptionalReferenceDirOption = None,
+) -> None:
+    """Run the five-brand demo slice from raw workbook through final demo scorecard outputs."""
+
+    settings = get_settings()
+    session = begin_command_audit("demo-happy-path")
+    input_paths: list[Path | str] = [
+        input_path or settings.data_raw,
+        reference_dir or settings.data_reference,
+    ]
+    try:
+        run = run_demo_happy_path_pipeline(
+            settings=settings,
+            input_path=input_path,
+            reference_dir=reference_dir,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        _record_command_failure(
+            settings=settings, session=session, input_paths=input_paths, exc=exc
+        )
+        console.print(f"[bold red]Happy-path demo failed[/bold red] - {exc}")
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        _record_command_failure(
+            settings=settings, session=session, input_paths=input_paths, exc=exc
+        )
+        raise
+
+    manifest_path, audit_log_path = _record_command_success(
+        settings=settings,
+        session=session,
+        input_paths=input_paths,
+        output_paths=[
+            run.artifacts.core_scorecard_html_path,
+            run.artifacts.brand_deltas_csv_path,
+            run.artifacts.top_risks_markdown_path,
+            run.artifacts.demo_gold_parquet_path,
+            run.artifacts.demo_syntheticness_parquet_path,
+        ],
+        row_counts={
+            "demo_gold_rows": len(run.demo_gold),
+            "demo_syntheticness_rows": len(run.demo_syntheticness),
+            "brand_delta_rows": len(run.brand_deltas),
+        },
+        data_classification=DataClassification.INTERNAL,
+        intended_audience="analyst",
+        publish_status_scope="five_brand_demo",
+        warnings_count=len(run.warnings),
+        errors_count=0,
+    )
+
+    console.print("[bold green]Five-brand happy-path demo complete[/bold green]")
+    console.print(f"Core scorecard HTML: {run.artifacts.core_scorecard_html_path}")
+    console.print(f"Brand deltas CSV: {run.artifacts.brand_deltas_csv_path}")
+    console.print(f"Top risks Markdown: {run.artifacts.top_risks_markdown_path}")
+    console.print(f"Demo Gold parquet: {run.artifacts.demo_gold_parquet_path}")
+    console.print(f"Demo syntheticness parquet: {run.artifacts.demo_syntheticness_parquet_path}")
+    console.print(f"Warnings: {len(run.warnings)}")
+    console.print(f"Manifest: {manifest_path}")
+    console.print(f"Audit log: {audit_log_path}")
 
 
 if __name__ == "__main__":
