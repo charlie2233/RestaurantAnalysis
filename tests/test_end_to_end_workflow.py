@@ -6,9 +6,9 @@ import json
 
 import pandas as pd
 import pytest
+from qsr_audit.cli import app
 from typer.testing import CliRunner
 
-from qsr_audit.cli import app
 from tests.helpers import build_settings
 
 

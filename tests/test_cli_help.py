@@ -39,6 +39,7 @@ from typer.testing import CliRunner
                 "inspect-rag-benchmark",
                 "rag-search",
                 "preflight-release",
+                "demo-happy-path",
                 "report",
             ],
         ),
@@ -73,6 +74,14 @@ from typer.testing import CliRunner
         (
             ["preflight-release", "--help"],
             ["Gold outputs", "lineage artifacts", "external-facing handoff"],
+        ),
+        (
+            ["demo-happy-path", "--help"],
+            [
+                "five-brand demo slice",
+                "final demo scorecard outputs",
+                "reference directory override",
+            ],
         ),
         (
             ["gate-gold", "--help"],

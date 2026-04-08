@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 
 from qsr_audit.config import get_settings
-from qsr_audit.demo import run_five_brand_happy_path_demo as run_five_brand_happy_path_demo_pipeline
+from qsr_audit.demo import run_demo_happy_path as run_demo_happy_path_pipeline
 from qsr_audit.forecasting import build_forecast_panel as build_forecast_panel_pipeline
 from qsr_audit.forecasting import forecast_baselines as forecast_baselines_pipeline
 from qsr_audit.forecasting import snapshot_gold_history as snapshot_gold_history_pipeline
@@ -128,6 +128,18 @@ InputWorkbookOption = Annotated[
     ),
 ]
 
+OptionalInputWorkbookOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--input",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        path_type=Path,
+        help="Optional workbook override for the five-brand happy-path demo.",
+    ),
+]
+
 ValidationInputOption = Annotated[
     Path,
     typer.Option(
@@ -184,6 +196,19 @@ ReferenceDirOption = Annotated[
     ),
 ]
 
+OptionalReferenceDirOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--reference-dir",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        path_type=Path,
+        help="Optional reference directory override for the five-brand happy-path demo.",
+    ),
+]
+
 ReportOutputOption = Annotated[
     Path,
     typer.Option(
@@ -223,31 +248,6 @@ ExperimentOutputOption = Annotated[
         help=(
             "Directory for non-analyst-facing experiment artifacts. Defaults to "
             "`artifacts/forecasting/<metric>`."
-        ),
-    ),
-]
-
-DemoOutputOption = Annotated[
-    Path | None,
-    typer.Option(
-        "--output-root",
-        file_okay=False,
-        dir_okay=True,
-        path_type=Path,
-        help=(
-            "Directory for the isolated demo workspace and summary artifacts. Defaults to "
-            "`artifacts/demo/5-brand-happy-path`."
-        ),
-    ),
-]
-
-DemoBrandsOption = Annotated[
-    list[str] | None,
-    typer.Option(
-        "--brand",
-        help=(
-            "Optional explicit brand name for the 5-brand slice. Pass exactly five times to "
-            "override deterministic auto-selection."
         ),
     ),
 ]
@@ -721,78 +721,6 @@ def gate_gold_command() -> None:
     console.print(f"Summary JSON: {run.artifacts.summary_json_path}")
     console.print(f"Manifest: {manifest_path}")
     console.print(f"Audit log: {audit_log_path}")
-
-
-@app.command("run-5-brand-demo")
-def run_5_brand_demo_command(
-    input_path: InputWorkbookOption,
-    output_root: DemoOutputOption = None,
-    brand: DemoBrandsOption = None,
-) -> None:
-    """Run an isolated 5-brand happy-path walkthrough with demo references and final artifacts."""
-
-    settings = get_settings()
-    session = begin_command_audit("run-5-brand-demo")
-    try:
-        run = run_five_brand_happy_path_demo_pipeline(
-            input_path=input_path,
-            settings=settings,
-            output_root=output_root,
-            brands=tuple(brand or ()),
-        )
-    except Exception as exc:
-        _record_command_failure(
-            settings=settings, session=session, input_paths=[input_path], exc=exc
-        )
-        raise
-
-    manifest_path, audit_log_path = _record_command_success(
-        settings=settings,
-        session=session,
-        input_paths=[input_path],
-        output_paths=[
-            run.artifacts.summary_json_path,
-            run.artifacts.summary_markdown_path,
-            run.artifacts.selected_brands_json_path,
-            run.gold_gate_run.artifacts.decisions_path,
-            run.gold_gate_run.artifacts.publishable_path,
-            run.report_artifacts.global_json,
-            run.strategy_run.artifacts.playbook_markdown_path,
-            run.preflight_run.artifacts.summary_json_path,
-            run.preflight_run.artifacts.summary_markdown_path,
-        ],
-        row_counts={
-            "selected_brands": len(run.selected_brands),
-            "publishable_rows": int(run.gold_gate_run.summary["publishable_count"]),
-            "advisory_rows": int(run.gold_gate_run.summary["advisory_count"]),
-            "blocked_rows": int(run.gold_gate_run.summary["blocked_count"]),
-        },
-        data_classification=DataClassification.INTERNAL,
-        intended_audience="analyst",
-        publish_status_scope="demo_happy_path",
-        warnings_count=int(run.preflight_run.summary["warning_check_count"]),
-        errors_count=int(run.preflight_run.summary["failed_check_count"]),
-        upstream_artifact_references=[
-            latest_manifest_path(run.demo_settings, "validate-workbook"),
-            latest_manifest_path(run.demo_settings, "run-syntheticness"),
-            latest_manifest_path(run.demo_settings, "reconcile"),
-            latest_manifest_path(run.demo_settings, "gate-gold"),
-        ],
-    )
-
-    console.print("[bold green]5-brand happy-path demo complete[/bold green]")
-    console.print(f"Selected brands: {', '.join(run.selected_brands)}")
-    console.print(f"Demo output root: {run.output_root}")
-    console.print(f"Demo summary JSON: {run.artifacts.summary_json_path}")
-    console.print(f"Demo summary Markdown: {run.artifacts.summary_markdown_path}")
-    console.print(f"Gold decisions: {run.gold_gate_run.artifacts.decisions_path}")
-    console.print(f"Global report JSON: {run.report_artifacts.global_json}")
-    console.print(f"Strategy playbook: {run.strategy_run.artifacts.playbook_markdown_path}")
-    console.print(f"Preflight summary: {run.preflight_run.artifacts.summary_markdown_path}")
-    console.print(f"Manifest: {manifest_path}")
-    console.print(f"Audit log: {audit_log_path}")
-    if not run.preflight_run.passed:
-        raise typer.Exit(code=1)
 
 
 @app.command("snapshot-gold")
@@ -1528,6 +1456,71 @@ def preflight_release_command() -> None:
     console.print(f"Audit log: {audit_log_path}")
     if not run.passed:
         raise typer.Exit(code=1)
+
+
+@app.command("demo-happy-path")
+def demo_happy_path_command(
+    input_path: OptionalInputWorkbookOption = None,
+    reference_dir: OptionalReferenceDirOption = None,
+) -> None:
+    """Run the five-brand demo slice from raw workbook through final demo scorecard outputs."""
+
+    settings = get_settings()
+    session = begin_command_audit("demo-happy-path")
+    input_paths: list[Path | str] = [
+        input_path or settings.data_raw,
+        reference_dir or settings.data_reference,
+    ]
+    try:
+        run = run_demo_happy_path_pipeline(
+            settings=settings,
+            input_path=input_path,
+            reference_dir=reference_dir,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        _record_command_failure(
+            settings=settings, session=session, input_paths=input_paths, exc=exc
+        )
+        console.print(f"[bold red]Happy-path demo failed[/bold red] - {exc}")
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        _record_command_failure(
+            settings=settings, session=session, input_paths=input_paths, exc=exc
+        )
+        raise
+
+    manifest_path, audit_log_path = _record_command_success(
+        settings=settings,
+        session=session,
+        input_paths=input_paths,
+        output_paths=[
+            run.artifacts.core_scorecard_html_path,
+            run.artifacts.brand_deltas_csv_path,
+            run.artifacts.top_risks_markdown_path,
+            run.artifacts.demo_gold_parquet_path,
+            run.artifacts.demo_syntheticness_parquet_path,
+        ],
+        row_counts={
+            "demo_gold_rows": len(run.demo_gold),
+            "demo_syntheticness_rows": len(run.demo_syntheticness),
+            "brand_delta_rows": len(run.brand_deltas),
+        },
+        data_classification=DataClassification.INTERNAL,
+        intended_audience="analyst",
+        publish_status_scope="five_brand_demo",
+        warnings_count=len(run.warnings),
+        errors_count=0,
+    )
+
+    console.print("[bold green]Five-brand happy-path demo complete[/bold green]")
+    console.print(f"Core scorecard HTML: {run.artifacts.core_scorecard_html_path}")
+    console.print(f"Brand deltas CSV: {run.artifacts.brand_deltas_csv_path}")
+    console.print(f"Top risks Markdown: {run.artifacts.top_risks_markdown_path}")
+    console.print(f"Demo Gold parquet: {run.artifacts.demo_gold_parquet_path}")
+    console.print(f"Demo syntheticness parquet: {run.artifacts.demo_syntheticness_parquet_path}")
+    console.print(f"Warnings: {len(run.warnings)}")
+    console.print(f"Manifest: {manifest_path}")
+    console.print(f"Audit log: {audit_log_path}")
 
 
 if __name__ == "__main__":

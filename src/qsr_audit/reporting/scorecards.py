@@ -188,10 +188,14 @@ def _build_global_scorecard(
     synthetic_overview["brands_requiring_review"] = sum(
         1 for brand in brand_scorecards if brand.review_required
     )
-    synthetic_overview["average_brand_score"] = round(
-        sum(brand.syntheticness_score for brand in brand_scorecards) / total_brands,
-        1,
-    ) if total_brands else 0.0
+    synthetic_overview["average_brand_score"] = (
+        round(
+            sum(brand.syntheticness_score for brand in brand_scorecards) / total_brands,
+            1,
+        )
+        if total_brands
+        else 0.0
+    )
 
     counts = inputs.validation_payload.get("counts", {}) if inputs.validation_payload else {}
     validation_counts = {

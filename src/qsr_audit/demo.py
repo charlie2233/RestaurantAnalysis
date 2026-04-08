@@ -1,4 +1,4 @@
-"""Deterministic 5-brand happy-path demo orchestration."""
+"""Five-brand end-to-end happy-path demo orchestration."""
 
 from __future__ import annotations
 
@@ -11,740 +11,598 @@ from typing import Any
 import pandas as pd
 
 from qsr_audit.config import Settings
-from qsr_audit.contracts.workbook import SILVER_OUTPUT_FILES
-from qsr_audit.gold import GoldGateRun, gate_gold_publish
-from qsr_audit.governance import (
-    DataClassification,
-    format_artifact_path,
-    latest_manifest_path,
-    write_artifact_manifest,
-)
-from qsr_audit.ingest import IngestWorkbookArtifacts, canonicalize_brand_name, ingest_workbook
-from qsr_audit.reconcile import REFERENCE_TEMPLATE_FILES, ReconciliationRun, reconcile_core_metrics
-from qsr_audit.reconcile.pipeline import REFERENCE_TEMPLATE_COLUMNS
-from qsr_audit.release import ReleasePreflightRun, preflight_release
-from qsr_audit.reporting import ReportArtifacts, write_reports
-from qsr_audit.strategy import StrategyRun, generate_strategy_outputs
-from qsr_audit.validate import SyntheticnessRun, ValidationRun, run_syntheticness, validate_workbook
+from qsr_audit.gold import gate_gold_publish
+from qsr_audit.ingest import ingest_workbook
+from qsr_audit.reconcile import load_reference_catalog, reconcile_core_metrics
+from qsr_audit.reconcile.reconciliation import select_best_reference_row
+from qsr_audit.reporting import build_report_bundle, load_report_inputs
+from qsr_audit.validate import run_syntheticness, validate_workbook
 
-DEFAULT_DEMO_RELATIVE_ROOT = Path("demo/5-brand-happy-path")
-DEMO_REFERENCE_AS_OF_DATE = "2024-12-31"
-DEMO_REFERENCE_CONFIDENCE = 0.95
-DEMO_REFERENCE_NOTE = (
-    "Deterministic demo reference row mirrored from the selected Silver slice to exercise the "
-    "happy-path pipeline. It is a walkthrough artifact, not external truth."
+DEMO_BRANDS: tuple[str, ...] = (
+    "Starbucks",
+    "Taco Bell",
+    "Raising Cane's",
+    "Dutch Bros",
+    "Shake Shack",
+)
+DEMO_COMMAND_NAME = "demo-happy-path"
+DEMO_WORKSPACE_DIRNAME = "demo_happy_path"
+DELTA_FIELD_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("rank", "reference_rank", "rank"),
+    ("us_store_count_2024", "reference_us_store_count_2024", "store_count"),
+    (
+        "systemwide_revenue_usd_billions_2024",
+        "reference_systemwide_revenue_usd_billions_2024",
+        "system_sales",
+    ),
+    ("average_unit_volume_usd_thousands", "reference_average_unit_volume_usd_thousands", "auv"),
 )
 
 
 @dataclass(frozen=True)
-class FiveBrandDemoArtifacts:
-    """Top-level files written by the happy-path demo."""
+class DemoArtifacts:
+    """Final demo artifact locations."""
 
-    summary_json_path: Path
-    summary_markdown_path: Path
-    selected_brands_json_path: Path
-    demo_silver_dir: Path
-    demo_reference_dir: Path
+    core_scorecard_html_path: Path
+    brand_deltas_csv_path: Path
+    top_risks_markdown_path: Path
+    demo_gold_parquet_path: Path
+    demo_syntheticness_parquet_path: Path
 
 
 @dataclass(frozen=True)
-class FiveBrandHappyPathDemoRun:
-    """Complete result for the end-to-end 5-brand demo."""
+class DemoHappyPathRun:
+    """Complete demo run result."""
 
-    input_path: Path
-    output_root: Path
-    workspace_root: Path
-    demo_settings: Settings
-    ingest_artifacts: IngestWorkbookArtifacts
-    selected_brands: tuple[str, ...]
-    validation_run: ValidationRun
-    syntheticness_run: SyntheticnessRun
-    reconciliation_run: ReconciliationRun
-    gold_gate_run: GoldGateRun
-    report_artifacts: ReportArtifacts
-    strategy_run: StrategyRun
-    preflight_run: ReleasePreflightRun
-    artifacts: FiveBrandDemoArtifacts
+    artifacts: DemoArtifacts
+    demo_gold: pd.DataFrame
+    demo_syntheticness: pd.DataFrame
+    brand_deltas: pd.DataFrame
+    warnings: tuple[str, ...]
 
 
-def run_five_brand_happy_path_demo(
+def run_demo_happy_path(
     *,
-    input_path: Path,
     settings: Settings | None = None,
-    output_root: Path | None = None,
-    brands: tuple[str, ...] = (),
-) -> FiveBrandHappyPathDemoRun:
-    """Run the isolated 5-brand workbook demo with existing pipeline stages."""
+    input_path: Path | None = None,
+    reference_dir: Path | None = None,
+) -> DemoHappyPathRun:
+    """Run the 5-brand happy-path demo end to end in an isolated workspace."""
 
-    base_settings = settings or Settings()
-    resolved_input = input_path.expanduser().resolve()
-    if not resolved_input.exists():
-        raise FileNotFoundError(f"Workbook not found: {resolved_input}")
-
-    resolved_output_root = base_settings.validate_artifact_root(
-        (output_root or (base_settings.artifacts_dir / DEFAULT_DEMO_RELATIVE_ROOT))
-        .expanduser()
-        .resolve(),
-        purpose="5-brand happy-path demo output",
+    resolved_settings = settings or Settings()
+    workbook_path = (input_path or _default_workbook_path(resolved_settings)).expanduser().resolve()
+    resolved_reference_dir = (
+        (reference_dir or resolved_settings.data_reference).expanduser().resolve()
     )
-    workspace_root = resolved_output_root / "workspace"
+
+    workspace_root = resolved_settings.validate_artifact_root(
+        resolved_settings.artifacts_dir / DEMO_WORKSPACE_DIRNAME,
+        purpose="happy-path demo workspace",
+    )
     if workspace_root.exists():
         shutil.rmtree(workspace_root)
-    workspace_root.mkdir(parents=True, exist_ok=True)
+    demo_settings = _build_demo_settings(
+        base_settings=resolved_settings,
+        workspace_root=workspace_root,
+        reference_dir=resolved_reference_dir,
+    )
 
-    demo_settings = Settings(
-        data_raw=workspace_root / "data" / "raw",
-        data_bronze=workspace_root / "data" / "bronze",
-        data_silver=workspace_root / "data" / "silver",
-        data_gold=workspace_root / "data" / "gold",
-        data_reference=workspace_root / "data" / "reference",
+    ingest_workbook(workbook_path, demo_settings)
+    _filter_demo_silver(demo_settings)
+
+    reference_frame, reference_warnings, _ = load_reference_catalog(resolved_reference_dir)
+    missing_brands = _missing_demo_reference_brands(reference_frame)
+    if missing_brands:
+        joined = ", ".join(missing_brands)
+        raise ValueError(
+            "The happy-path demo requires QSR50 coverage for all five demo brands. "
+            f"Missing: {joined}."
+        )
+
+    validate_workbook(
+        demo_settings.data_silver,
+        settings=demo_settings,
+        output_dir=demo_settings.reports_dir / "validation",
+        gold_dir=demo_settings.data_gold,
+    )
+    run_syntheticness(
+        demo_settings.data_silver / "core_brand_metrics.parquet",
+        settings=demo_settings,
+        output_dir=demo_settings.reports_dir / "validation",
+        gold_dir=demo_settings.data_gold,
+    )
+    reconciliation_run = reconcile_core_metrics(
+        core_path=demo_settings.data_silver / "core_brand_metrics.parquet",
+        reference_dir=resolved_reference_dir,
+        settings=demo_settings,
+        gold_dir=demo_settings.data_gold,
+        report_dir=demo_settings.reports_dir / "reconciliation",
+    )
+    gold_run = gate_gold_publish(
+        settings=demo_settings,
+        gold_dir=demo_settings.data_gold,
+        report_dir=demo_settings.reports_dir / "audit",
+    )
+
+    report_bundle = build_report_bundle(load_report_inputs(demo_settings))
+    demo_syntheticness = _build_demo_syntheticness(report_bundle)
+    demo_gold = _build_demo_gold(
+        decisions=gold_run.decisions,
+        reconciled_core_metrics=reconciliation_run.reconciled_core_metrics,
+        syntheticness=demo_syntheticness,
+    )
+    brand_deltas = _build_brand_deltas(
+        reconciled_core_metrics=reconciliation_run.reconciled_core_metrics,
+        reference_frame=reference_frame,
+        demo_gold=demo_gold,
+    )
+
+    artifacts = _write_demo_outputs(
+        settings=resolved_settings,
+        demo_gold=demo_gold,
+        demo_syntheticness=demo_syntheticness,
+        brand_deltas=brand_deltas,
+        report_bundle=report_bundle,
+    )
+
+    return DemoHappyPathRun(
+        artifacts=artifacts,
+        demo_gold=demo_gold,
+        demo_syntheticness=demo_syntheticness,
+        brand_deltas=brand_deltas,
+        warnings=tuple(reference_warnings) + reconciliation_run.warnings,
+    )
+
+
+def _default_workbook_path(settings: Settings) -> Path:
+    workbooks = sorted(
+        path
+        for path in settings.data_raw.iterdir()
+        if path.is_file() and path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}
+    )
+    if len(workbooks) != 1:
+        raise FileNotFoundError(
+            "demo-happy-path requires exactly one workbook under `data/raw/` when "
+            "`--input` is not provided."
+        )
+    return workbooks[0]
+
+
+def _build_demo_settings(
+    *,
+    base_settings: Settings,
+    workspace_root: Path,
+    reference_dir: Path,
+) -> Settings:
+    return Settings(
+        data_raw=workspace_root / "raw",
+        data_bronze=workspace_root / "bronze",
+        data_silver=workspace_root / "silver",
+        data_gold=workspace_root / "gold",
+        data_reference=reference_dir,
+        gold_history_dir=workspace_root / "gold" / "history",
         reports_dir=workspace_root / "reports",
         strategy_dir=workspace_root / "strategy",
         artifacts_dir=workspace_root / "artifacts",
         log_level=base_settings.log_level,
     )
 
-    ingest_artifacts = ingest_workbook(resolved_input, demo_settings)
-    selection_validation = validate_workbook(
-        demo_settings.data_silver,
-        settings=demo_settings,
-        output_dir=workspace_root / "_selection" / "validation",
-        gold_dir=workspace_root / "_selection" / "gold",
-    )
-    selection_syntheticness = run_syntheticness(
-        demo_settings.data_silver,
-        settings=demo_settings,
-        output_dir=workspace_root / "_selection" / "validation",
-        gold_dir=workspace_root / "_selection" / "gold",
-        include_isolation_forest=False,
-    )
 
-    full_core = pd.read_parquet(ingest_artifacts.silver_artifacts.core_brand_metrics_path)
-    full_ai = pd.read_parquet(ingest_artifacts.silver_artifacts.ai_strategy_registry_path)
-    selected_brands = _select_demo_brands(
-        core_frame=full_core,
-        ai_frame=full_ai,
-        validation_run=selection_validation,
-        syntheticness_run=selection_syntheticness,
-        forced_brands=brands,
-    )
+def _filter_demo_silver(settings: Settings) -> None:
+    brand_set = set(DEMO_BRANDS)
+    core_path = settings.data_silver / "core_brand_metrics.parquet"
+    ai_path = settings.data_silver / "ai_strategy_registry.parquet"
 
-    demo_silver_dir = resolved_output_root / "silver_slice"
-    if demo_silver_dir.exists():
-        shutil.rmtree(demo_silver_dir)
-    demo_silver_dir.mkdir(parents=True, exist_ok=True)
-    _write_demo_silver_slice(
-        selected_brands=selected_brands,
-        full_core=full_core,
-        full_ai=full_ai,
-        data_notes_path=ingest_artifacts.silver_artifacts.data_notes_path,
-        key_findings_path=ingest_artifacts.silver_artifacts.key_findings_path,
-        output_dir=demo_silver_dir,
-    )
+    core_frame = pd.read_parquet(core_path)
+    ai_frame = pd.read_parquet(ai_path)
+    filtered_core = core_frame.loc[core_frame["brand_name"].isin(brand_set)].reset_index(drop=True)
+    filtered_ai = ai_frame.loc[ai_frame["brand_name"].isin(brand_set)].reset_index(drop=True)
 
-    demo_reference_dir = demo_settings.data_reference
-    _prepare_demo_reference_dir(
-        source_reference_dir=base_settings.data_reference,
-        output_dir=demo_reference_dir,
-        selected_core=pd.read_parquet(demo_silver_dir / SILVER_OUTPUT_FILES["core_brand_metrics"]),
-    )
+    _require_demo_brand_coverage(filtered_core["brand_name"], "core_brand_metrics")
+    _require_demo_brand_coverage(filtered_ai["brand_name"], "ai_strategy_registry")
 
-    validation_run = validate_workbook(demo_silver_dir, settings=demo_settings)
-    if not validation_run.passed:
-        raise ValueError(
-            "The selected 5-brand demo slice still has validation errors. Pass explicit `--brand` "
-            "values or adjust the source workbook."
-        )
-    _write_demo_manifest_for_validation(
-        settings=demo_settings,
-        input_path=demo_silver_dir,
-        run=validation_run,
-    )
-
-    syntheticness_run = run_syntheticness(
-        demo_silver_dir,
-        settings=demo_settings,
-        include_isolation_forest=False,
-    )
-    _write_demo_manifest_for_syntheticness(
-        settings=demo_settings,
-        input_path=demo_silver_dir,
-        run=syntheticness_run,
-    )
-
-    reconciliation_run = reconcile_core_metrics(
-        core_path=demo_silver_dir / SILVER_OUTPUT_FILES["core_brand_metrics"],
-        reference_dir=demo_reference_dir,
-        settings=demo_settings,
-    )
-    _write_demo_manifest_for_reconciliation(
-        settings=demo_settings,
-        core_path=demo_silver_dir / SILVER_OUTPUT_FILES["core_brand_metrics"],
-        reference_dir=demo_reference_dir,
-        run=reconciliation_run,
-    )
-
-    gold_gate_run = gate_gold_publish(settings=demo_settings)
-    _write_demo_manifest_for_gold_gate(settings=demo_settings, run=gold_gate_run)
-
-    report_artifacts = write_reports(output_root=demo_settings.reports_dir, settings=demo_settings)
-    strategy_run = generate_strategy_outputs(
-        settings=demo_settings,
-        strategy_dir=demo_settings.strategy_dir,
-        report_dir=demo_settings.reports_dir / "strategy",
-    )
-    preflight_run = preflight_release(settings=demo_settings)
-
-    artifacts = _write_demo_summary(
-        output_root=resolved_output_root,
-        input_path=resolved_input,
-        selected_brands=selected_brands,
-        demo_silver_dir=demo_silver_dir,
-        demo_reference_dir=demo_reference_dir,
-        demo_settings=demo_settings,
-        validation_run=validation_run,
-        syntheticness_run=syntheticness_run,
-        reconciliation_run=reconciliation_run,
-        gold_gate_run=gold_gate_run,
-        report_artifacts=report_artifacts,
-        strategy_run=strategy_run,
-        preflight_run=preflight_run,
-    )
-
-    return FiveBrandHappyPathDemoRun(
-        input_path=resolved_input,
-        output_root=resolved_output_root,
-        workspace_root=workspace_root,
-        demo_settings=demo_settings,
-        ingest_artifacts=ingest_artifacts,
-        selected_brands=selected_brands,
-        validation_run=validation_run,
-        syntheticness_run=syntheticness_run,
-        reconciliation_run=reconciliation_run,
-        gold_gate_run=gold_gate_run,
-        report_artifacts=report_artifacts,
-        strategy_run=strategy_run,
-        preflight_run=preflight_run,
-        artifacts=artifacts,
-    )
+    filtered_core.to_parquet(core_path, index=False)
+    filtered_ai.to_parquet(ai_path, index=False)
 
 
-def _select_demo_brands(
-    *,
-    core_frame: pd.DataFrame,
-    ai_frame: pd.DataFrame,
-    validation_run: ValidationRun,
-    syntheticness_run: SyntheticnessRun,
-    forced_brands: tuple[str, ...],
-) -> tuple[str, ...]:
-    if forced_brands:
-        normalized = tuple(
-            brand
-            for brand in (canonicalize_brand_name(value) for value in forced_brands)
-            if brand is not None
-        )
-        unique = tuple(dict.fromkeys(normalized))
-        if len(unique) != 5:
-            raise ValueError("Pass exactly five unique `--brand` values for the demo slice.")
-        available = {
-            str(value)
-            for value in core_frame.get("brand_name", pd.Series(dtype=str)).dropna().astype(str)
-        }
-        missing = sorted(set(unique) - available)
-        if missing:
-            raise ValueError(
-                "One or more requested demo brands are missing from the workbook: "
-                + ", ".join(missing)
-            )
-        return unique
-
-    ai_brands = {
-        str(value)
-        for value in ai_frame.get("brand_name", pd.Series(dtype=str)).dropna().astype(str)
-        if str(value).strip()
-    }
-    error_brands = {
-        str(finding.brand_name)
-        for finding in validation_run.findings
-        if finding.severity == "error" and finding.brand_name
-    }
-    warning_brands = {
-        str(finding.brand_name)
-        for finding in validation_run.findings
-        if finding.severity == "warning" and finding.brand_name
-    }
-    synthetic_brand_counts: dict[str, int] = {}
-    for signal in syntheticness_run.report.signals:
-        if signal.strength not in {"moderate", "strong"}:
-            continue
-        brand_name = canonicalize_brand_name(
-            signal.details.get("canonical_brand_name") or signal.details.get("brand_name")
-        )
-        if brand_name is None:
-            continue
-        synthetic_brand_counts[brand_name] = synthetic_brand_counts.get(brand_name, 0) + 1
-
-    median_rank = float(core_frame["rank"].dropna().astype(float).median())
-    ranking_rows: list[tuple[tuple[float, ...], str]] = []
-    for row in core_frame.to_dict(orient="records"):
-        brand_name = canonicalize_brand_name(row.get("brand_name"))
-        if brand_name is None:
-            continue
-        if any(row.get(column) is None or pd.isna(row.get(column)) for column in _required_metrics()):
-            continue
-        rank_value = _as_float(row.get("rank")) or 999.0
-        ranking_rows.append(
-            (
-                (
-                    0.0 if brand_name in ai_brands else 1.0,
-                    0.0 if brand_name not in error_brands else 1.0,
-                    float(synthetic_brand_counts.get(brand_name, 0)),
-                    0.0 if brand_name not in warning_brands else 1.0,
-                    abs(rank_value - median_rank),
-                    rank_value,
-                ),
-                brand_name,
-            )
-        )
-
-    ordered = [brand_name for _score, brand_name in sorted(ranking_rows, key=lambda item: item[0])]
-    selected = tuple(dict.fromkeys(ordered))[:5]
-    if len(selected) != 5:
-        raise ValueError(
-            "Could not derive five deterministic demo brands from the workbook. Pass explicit "
-            "`--brand` values."
-        )
-    return selected
+def _require_demo_brand_coverage(values: pd.Series, dataset_name: str) -> None:
+    found = {str(value) for value in values.dropna().astype(str)}
+    missing = sorted(set(DEMO_BRANDS) - found)
+    if missing:
+        joined = ", ".join(missing)
+        raise ValueError(f"{dataset_name} is missing required demo brands: {joined}.")
 
 
-def _required_metrics() -> tuple[str, ...]:
-    return (
-        "rank",
-        "us_store_count_2024",
-        "systemwide_revenue_usd_billions_2024",
-        "average_unit_volume_usd_thousands",
-    )
-
-
-def _write_demo_silver_slice(
-    *,
-    selected_brands: tuple[str, ...],
-    full_core: pd.DataFrame,
-    full_ai: pd.DataFrame,
-    data_notes_path: Path,
-    key_findings_path: Path,
-    output_dir: Path,
-) -> None:
-    selected_set = set(selected_brands)
-    sliced_core = full_core.loc[full_core["brand_name"].isin(selected_set)].copy()
-    sliced_ai = full_ai.loc[full_ai["brand_name"].isin(selected_set)].copy()
-    sliced_core = sliced_core.sort_values(by=["rank", "brand_name"], kind="stable").reset_index(
-        drop=True
-    )
-    sliced_ai = sliced_ai.sort_values(by=["brand_name", "row_number"], kind="stable").reset_index(
-        drop=True
-    )
-    if len(sliced_core.index) != 5:
-        raise ValueError(
-            f"Expected exactly five core demo rows after slicing, found {len(sliced_core.index)}."
-        )
-    if set(sliced_ai["brand_name"].astype(str)) != selected_set:
-        raise ValueError(
-            "The selected 5-brand demo slice does not have one AI strategy row for every brand."
-        )
-
-    sliced_core.to_parquet(output_dir / SILVER_OUTPUT_FILES["core_brand_metrics"], index=False)
-    sliced_ai.to_parquet(output_dir / SILVER_OUTPUT_FILES["ai_strategy_registry"], index=False)
-    pd.read_parquet(data_notes_path).to_parquet(
-        output_dir / SILVER_OUTPUT_FILES["data_notes"],
-        index=False,
-    )
-    pd.read_parquet(key_findings_path).to_parquet(
-        output_dir / SILVER_OUTPUT_FILES["key_findings"],
-        index=False,
-    )
-
-
-def _prepare_demo_reference_dir(
-    *,
-    source_reference_dir: Path,
-    output_dir: Path,
-    selected_core: pd.DataFrame,
-) -> None:
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    source_templates = source_reference_dir / "templates"
-    if not source_templates.exists():
-        raise FileNotFoundError(
-            f"Reference templates directory is missing: {source_templates}"
-        )
-    shutil.copytree(source_templates, output_dir / "templates")
-
-    reference_frames = _build_demo_reference_frames(selected_core)
-    for file_name, frame in reference_frames.items():
-        frame.to_csv(output_dir / file_name, index=False, encoding="utf-8-sig")
-
-
-def _build_demo_reference_frames(selected_core: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    rows_by_file: dict[str, list[dict[str, Any]]] = {
-        file_name: [] for file_name in REFERENCE_TEMPLATE_FILES
-    }
-    for row in selected_core.to_dict(orient="records"):
-        brand_name = str(row["brand_name"])
-        slug = _brand_slug(brand_name)
-        common = {
-            "brand_name": brand_name,
-            "canonical_brand_name": brand_name,
-            "as_of_date": DEMO_REFERENCE_AS_OF_DATE,
-            "method_reported_or_estimated": "reported",
-            "confidence_score": DEMO_REFERENCE_CONFIDENCE,
-            "notes": DEMO_REFERENCE_NOTE,
-            "currency": "USD",
-            "geography": "US",
-            "source_page": "1",
-            "source_excerpt": f"Demo walkthrough evidence for {brand_name}.",
-        }
-
-        rows_by_file["qsr50_reference.csv"].append(
-            {
-                **common,
-                "source_type": "industry_ranking",
-                "source_name": "Demo QSR50 walkthrough",
-                "source_url_or_doc_id": f"demo:qsr50:{slug}",
-                "qsr50_rank": _as_int(row.get("rank")),
-                "us_store_count_2024": _as_int(row.get("us_store_count_2024")),
-                "systemwide_revenue_usd_billions_2024": _as_float(
-                    row.get("systemwide_revenue_usd_billions_2024")
-                ),
-                "average_unit_volume_usd_thousands": _as_float(
-                    row.get("average_unit_volume_usd_thousands")
-                ),
-            }
-        )
-        rows_by_file["technomic_reference.csv"].append(
-            {
-                **common,
-                "source_type": "industry_estimate",
-                "source_name": "Demo Technomic walkthrough",
-                "source_url_or_doc_id": f"demo:technomic:{slug}",
-                "technomic_rank": _as_int(row.get("rank")),
-                "us_store_count_estimate": _as_int(row.get("us_store_count_2024")),
-                "systemwide_revenue_usd_billions_estimate": _as_float(
-                    row.get("systemwide_revenue_usd_billions_2024")
-                ),
-                "average_unit_volume_usd_thousands_estimate": _as_float(
-                    row.get("average_unit_volume_usd_thousands")
-                ),
-                "margin_estimate_pct": _as_float(row.get("margin_mid_pct")),
-            }
-        )
-        rows_by_file["sec_filings_reference.csv"].append(
-            {
-                **common,
-                "source_type": "sec_filing",
-                "source_name": "Demo SEC walkthrough",
-                "source_url_or_doc_id": f"demo:sec:{slug}",
-                "filing_type": "10-K",
-                "filing_date": DEMO_REFERENCE_AS_OF_DATE,
-                "us_store_count": _as_int(row.get("us_store_count_2024")),
-                "systemwide_revenue_usd_billions": _as_float(
-                    row.get("systemwide_revenue_usd_billions_2024")
-                ),
-                "revenue_segment_notes": "Demo mirrored total for walkthrough coverage.",
-            }
-        )
-        rows_by_file["franchise_disclosure_reference.csv"].append(
-            {
-                **common,
-                "source_type": "franchise_disclosure_document",
-                "source_name": "Demo FDD walkthrough",
-                "source_url_or_doc_id": f"demo:fdd:{slug}",
-                "fdd_year": 2024,
-                "franchise_units_us": _as_int(row.get("us_store_count_2024")),
-                "royalty_rate_pct": 5.0,
-                "advertising_fund_rate_pct": 4.0,
-                "average_unit_volume_usd_thousands": _as_float(
-                    row.get("average_unit_volume_usd_thousands")
-                ),
-            }
-        )
-
-    frames: dict[str, pd.DataFrame] = {}
-    for file_name, rows in rows_by_file.items():
-        frames[file_name] = pd.DataFrame(rows, columns=REFERENCE_TEMPLATE_COLUMNS[file_name])
-    return frames
-
-
-def _write_demo_manifest_for_validation(
-    *,
-    settings: Settings,
-    input_path: Path,
-    run: ValidationRun,
-) -> Path:
-    return write_artifact_manifest(
-        settings=settings,
-        command_name="validate-workbook",
-        input_paths=[input_path],
-        output_paths=[
-            run.artifacts.summary_markdown,
-            run.artifacts.results_json,
-            run.artifacts.flags_parquet,
-        ],
-        row_counts={
-            "validation_findings": len(run.findings),
-            "validation_flags": len(run.findings),
-        },
-        data_classification=DataClassification.CONFIDENTIAL,
-        intended_audience="analyst",
-        publish_status_scope="working_layer_findings",
-        warnings_count=run.counts["warning"],
-        errors_count=run.counts["error"],
-    )
-
-
-def _write_demo_manifest_for_syntheticness(
-    *,
-    settings: Settings,
-    input_path: Path,
-    run: SyntheticnessRun,
-) -> Path:
-    return write_artifact_manifest(
-        settings=settings,
-        command_name="run-syntheticness",
-        input_paths=[input_path],
-        output_paths=[run.artifacts.report_markdown, run.artifacts.signals_parquet],
-        row_counts={"syntheticness_signals": len(run.report.signals)},
-        data_classification=DataClassification.INTERNAL,
-        intended_audience="analyst",
-        publish_status_scope="experimental_signals",
-        warnings_count=run.counts["strong"] + run.counts["moderate"] + run.counts["weak"],
-        errors_count=0,
-        upstream_artifact_references=[latest_manifest_path(settings, "validate-workbook")],
-    )
-
-
-def _write_demo_manifest_for_reconciliation(
-    *,
-    settings: Settings,
-    core_path: Path,
-    reference_dir: Path,
-    run: ReconciliationRun,
-) -> Path:
-    return write_artifact_manifest(
-        settings=settings,
-        command_name="reconcile",
-        input_paths=[core_path, reference_dir],
-        output_paths=[
-            run.artifacts.reconciled_core_metrics_path,
-            run.artifacts.provenance_registry_path,
-            run.artifacts.reconciliation_summary_path,
-            run.artifacts.reference_coverage_parquet_path,
-            run.artifacts.reference_coverage_markdown_path,
-        ],
-        row_counts={
-            "reconciled_core_metrics": len(run.reconciled_core_metrics),
-            "provenance_registry": len(run.provenance_registry),
-            "reference_coverage": len(run.reference_coverage),
-        },
-        data_classification=DataClassification.CONFIDENTIAL,
-        intended_audience="analyst",
-        publish_status_scope="all_gold_rows",
-        warnings_count=len(run.warnings),
-        errors_count=0,
-        upstream_artifact_references=[latest_manifest_path(settings, "validate-workbook")],
-    )
-
-
-def _write_demo_manifest_for_gold_gate(
-    *,
-    settings: Settings,
-    run: GoldGateRun,
-) -> Path:
-    gold_inputs = [
-        settings.data_gold / "reconciled_core_metrics.parquet",
-        settings.data_gold / "provenance_registry.parquet",
-        settings.data_gold / "validation_flags.parquet",
-        settings.data_gold / "reference_coverage.parquet",
-        settings.data_gold / "syntheticness_signals.parquet",
+def _missing_demo_reference_brands(reference_frame: pd.DataFrame) -> list[str]:
+    qsr50_rows = reference_frame.loc[
+        reference_frame["source_file_name"].eq("qsr50_reference.csv")
+        & reference_frame["canonical_brand_name"].isin(DEMO_BRANDS)
     ]
-    return write_artifact_manifest(
-        settings=settings,
-        command_name="gate-gold",
-        input_paths=gold_inputs,
-        output_paths=[
-            run.artifacts.decisions_path,
-            run.artifacts.publishable_path,
-            run.artifacts.blocked_path,
-            run.artifacts.scorecard_markdown_path,
-            run.artifacts.summary_json_path,
-        ],
-        row_counts={
-            "decision_rows": len(run.decisions),
-            "publishable_rows": int(run.summary["publishable_count"]),
-            "advisory_rows": int(run.summary["advisory_count"]),
-            "blocked_rows": int(run.summary["blocked_count"]),
-        },
-        data_classification=DataClassification.INTERNAL,
-        intended_audience="release_manager",
-        publish_status_scope="publishable_advisory_blocked",
-        warnings_count=int(run.summary["advisory_count"]),
-        errors_count=int(run.summary["blocked_count"]),
-        upstream_artifact_references=[
-            latest_manifest_path(settings, "validate-workbook"),
-            latest_manifest_path(settings, "run-syntheticness"),
-            latest_manifest_path(settings, "reconcile"),
-        ],
+    covered = {str(value) for value in qsr50_rows["canonical_brand_name"].dropna().astype(str)}
+    return sorted(set(DEMO_BRANDS) - covered)
+
+
+def _build_demo_syntheticness(report_bundle) -> pd.DataFrame:
+    rows = []
+    for scorecard in report_bundle.brand_scorecards:
+        rows.append(
+            {
+                "brand_name": scorecard.brand_name,
+                "canonical_brand_name": scorecard.canonical_brand_name,
+                "syntheticness_score": int(scorecard.syntheticness_score),
+                "supporting_signals": json.dumps(
+                    scorecard.supporting_signals, ensure_ascii=False, default=str
+                ),
+                "review_required": bool(scorecard.review_required),
+                "caveats": json.dumps(scorecard.caveats, ensure_ascii=False, default=str),
+            }
+        )
+    return pd.DataFrame(rows).sort_values(
+        by="canonical_brand_name",
+        kind="stable",
+        ignore_index=True,
     )
 
 
-def _write_demo_summary(
+def _build_demo_gold(
     *,
-    output_root: Path,
-    input_path: Path,
-    selected_brands: tuple[str, ...],
-    demo_silver_dir: Path,
-    demo_reference_dir: Path,
-    demo_settings: Settings,
-    validation_run: ValidationRun,
-    syntheticness_run: SyntheticnessRun,
-    reconciliation_run: ReconciliationRun,
-    gold_gate_run: GoldGateRun,
-    report_artifacts: ReportArtifacts,
-    strategy_run: StrategyRun,
-    preflight_run: ReleasePreflightRun,
-) -> FiveBrandDemoArtifacts:
-    selected_brands_json_path = output_root / "selected_brands.json"
-    selected_brands_json_path.write_text(
-        json.dumps({"brands": list(selected_brands)}, ensure_ascii=False, indent=2),
+    decisions: pd.DataFrame,
+    reconciled_core_metrics: pd.DataFrame,
+    syntheticness: pd.DataFrame,
+) -> pd.DataFrame:
+    provenance_lookup = reconciled_core_metrics[
+        [
+            "canonical_brand_name",
+            "overall_credibility_grade",
+            "provenance_completeness_score",
+            "provenance_completeness_summary",
+            "provenance_confidence_summary",
+        ]
+    ].copy()
+    provenance_lookup["provenance_grade"] = provenance_lookup["provenance_completeness_score"].map(
+        _score_to_grade
+    )
+
+    brand_recommendations = _brand_publish_recommendations(decisions)
+    frame = (
+        decisions.merge(
+            provenance_lookup,
+            on="canonical_brand_name",
+            how="left",
+        )
+        .merge(
+            syntheticness,
+            on=["brand_name", "canonical_brand_name"],
+            how="left",
+        )
+        .merge(
+            brand_recommendations,
+            on="canonical_brand_name",
+            how="left",
+        )
+    )
+
+    for column in ("blocking_reasons", "warning_reasons", "validation_references"):
+        if column in frame.columns:
+            frame[column] = frame[column].map(
+                lambda value: json.dumps(value, ensure_ascii=False, default=str)
+            )
+    return frame.sort_values(
+        by=["canonical_brand_name", "metric_name"],
+        kind="stable",
+        ignore_index=True,
+    )
+
+
+def _brand_publish_recommendations(decisions: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for canonical_brand_name, frame in decisions.groupby("canonical_brand_name", sort=True):
+        counts = frame["publish_status"].value_counts().to_dict()
+        publishable = int(counts.get("publishable", 0))
+        advisory = int(counts.get("advisory", 0))
+        blocked = int(counts.get("blocked", 0))
+        if blocked and publishable:
+            recommendation = "publishable_subset_only"
+        elif blocked:
+            recommendation = "blocked_for_external_use"
+        elif advisory and publishable:
+            recommendation = "publishable_subset_only"
+        elif advisory:
+            recommendation = "advisory_only"
+        else:
+            recommendation = "publishable"
+        rows.append(
+            {
+                "canonical_brand_name": canonical_brand_name,
+                "brand_publish_status_recommendation": recommendation,
+                "publishable_metric_count": publishable,
+                "advisory_metric_count": advisory,
+                "blocked_metric_count": blocked,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _build_brand_deltas(
+    *,
+    reconciled_core_metrics: pd.DataFrame,
+    reference_frame: pd.DataFrame,
+    demo_gold: pd.DataFrame,
+) -> pd.DataFrame:
+    decision_lookup = demo_gold.set_index(["canonical_brand_name", "metric_name"])[
+        "publish_status"
+    ].to_dict()
+    recommendation_lookup = (
+        demo_gold.drop_duplicates("canonical_brand_name")
+        .set_index("canonical_brand_name")["brand_publish_status_recommendation"]
+        .to_dict()
+    )
+
+    rows: list[dict[str, Any]] = []
+    for record in reconciled_core_metrics.to_dict(orient="records"):
+        canonical_name = str(record["canonical_brand_name"])
+        matched_refs = reference_frame.loc[
+            reference_frame["canonical_brand_name"].eq(canonical_name)
+        ].copy()
+        for workbook_column, reference_column, metric_name in DELTA_FIELD_SPECS:
+            best_reference = select_best_reference_row(matched_refs, field_name=reference_column)
+            prefix = metric_name
+            rows.append(
+                {
+                    "brand_name": record["brand_name"],
+                    "canonical_brand_name": canonical_name,
+                    "metric_name": metric_name,
+                    "workbook_value": record.get(workbook_column),
+                    "reference_value": record.get(f"{prefix}_reference_value"),
+                    "absolute_error": record.get(f"{prefix}_absolute_error"),
+                    "relative_error": record.get(f"{prefix}_relative_error"),
+                    "credibility_grade": record.get(f"{prefix}_credibility_grade"),
+                    "source_type": None
+                    if best_reference is None
+                    else best_reference.get("source_type"),
+                    "source_name": None
+                    if best_reference is None
+                    else best_reference.get("source_name"),
+                    "source_url_or_doc_id": None
+                    if best_reference is None
+                    else best_reference.get("source_url_or_doc_id"),
+                    "as_of_date": None
+                    if best_reference is None
+                    else best_reference.get("as_of_date"),
+                    "method_reported_or_estimated": None
+                    if best_reference is None
+                    else best_reference.get("method_reported_or_estimated"),
+                    "confidence_score": None
+                    if best_reference is None
+                    else best_reference.get("confidence_score"),
+                    "publish_status": decision_lookup.get((canonical_name, metric_name)),
+                    "brand_publish_status_recommendation": recommendation_lookup.get(
+                        canonical_name
+                    ),
+                }
+            )
+    return pd.DataFrame(rows).sort_values(
+        by=["canonical_brand_name", "metric_name"],
+        kind="stable",
+        ignore_index=True,
+    )
+
+
+def _write_demo_outputs(
+    *,
+    settings: Settings,
+    demo_gold: pd.DataFrame,
+    demo_syntheticness: pd.DataFrame,
+    brand_deltas: pd.DataFrame,
+    report_bundle,
+) -> DemoArtifacts:
+    validation_dir = settings.reports_dir / "validation"
+    reconciliation_dir = settings.reports_dir / "reconciliation"
+    summary_dir = settings.reports_dir / "summary"
+    validation_dir.mkdir(parents=True, exist_ok=True)
+    reconciliation_dir.mkdir(parents=True, exist_ok=True)
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    settings.data_gold.mkdir(parents=True, exist_ok=True)
+
+    artifacts = DemoArtifacts(
+        core_scorecard_html_path=validation_dir / "core_scorecard.html",
+        brand_deltas_csv_path=reconciliation_dir / "brand_deltas.csv",
+        top_risks_markdown_path=summary_dir / "top_risks.md",
+        demo_gold_parquet_path=settings.data_gold / "demo_gold.parquet",
+        demo_syntheticness_parquet_path=settings.data_gold / "demo_syntheticness.parquet",
+    )
+
+    demo_gold.to_parquet(artifacts.demo_gold_parquet_path, index=False)
+    demo_syntheticness.to_parquet(artifacts.demo_syntheticness_parquet_path, index=False)
+    brand_deltas.to_csv(artifacts.brand_deltas_csv_path, index=False, encoding="utf-8")
+    artifacts.top_risks_markdown_path.write_text(
+        _render_top_risks(
+            report_bundle=report_bundle, demo_gold=demo_gold, brand_deltas=brand_deltas
+        ),
         encoding="utf-8",
     )
-
-    summary_json_path = output_root / "demo_summary.json"
-    summary_markdown_path = output_root / "demo_summary.md"
-    payload = {
-        "demo_name": "5-brand-happy-path",
-        "input_path": format_artifact_path(input_path),
-        "output_root": format_artifact_path(output_root),
-        "workspace_root": format_artifact_path(demo_settings.artifacts_dir.parent),
-        "selected_brands": list(selected_brands),
-        "validation": {
-            "passed": validation_run.passed,
-            "counts": validation_run.counts,
-            "summary_path": format_artifact_path(validation_run.artifacts.summary_markdown),
-            "results_path": format_artifact_path(validation_run.artifacts.results_json),
-        },
-        "syntheticness": {
-            "counts": syntheticness_run.counts,
-            "report_path": format_artifact_path(syntheticness_run.artifacts.report_markdown),
-            "signals_path": format_artifact_path(syntheticness_run.artifacts.signals_parquet),
-        },
-        "reconciliation": {
-            "warnings_count": len(reconciliation_run.warnings),
-            "summary_path": format_artifact_path(
-                reconciliation_run.artifacts.reconciliation_summary_path
-            ),
-            "reconciled_core_metrics_path": format_artifact_path(
-                reconciliation_run.artifacts.reconciled_core_metrics_path
-            ),
-            "provenance_registry_path": format_artifact_path(
-                reconciliation_run.artifacts.provenance_registry_path
-            ),
-        },
-        "gold_gate": {
-            "publishable_count": int(gold_gate_run.summary["publishable_count"]),
-            "advisory_count": int(gold_gate_run.summary["advisory_count"]),
-            "blocked_count": int(gold_gate_run.summary["blocked_count"]),
-            "decisions_path": format_artifact_path(gold_gate_run.artifacts.decisions_path),
-            "publishable_path": format_artifact_path(gold_gate_run.artifacts.publishable_path),
-            "blocked_path": format_artifact_path(gold_gate_run.artifacts.blocked_path),
-        },
-        "reports": {
-            "global_markdown": format_artifact_path(report_artifacts.global_markdown),
-            "global_html": format_artifact_path(report_artifacts.global_html),
-            "global_json": format_artifact_path(report_artifacts.global_json),
-            "brand_report_count": len(report_artifacts.brand_json_paths),
-        },
-        "strategy": {
-            "recommendation_count": len(strategy_run.recommendations),
-            "recommendations_parquet_path": format_artifact_path(
-                strategy_run.artifacts.recommendations_parquet_path
-            ),
-            "playbook_path": format_artifact_path(strategy_run.artifacts.playbook_markdown_path),
-        },
-        "preflight": {
-            "passed": preflight_run.passed,
-            "failed_check_count": int(preflight_run.summary["failed_check_count"]),
-            "warning_check_count": int(preflight_run.summary["warning_check_count"]),
-            "summary_json_path": format_artifact_path(preflight_run.artifacts.summary_json_path),
-            "summary_markdown_path": format_artifact_path(
-                preflight_run.artifacts.summary_markdown_path
-            ),
-        },
-        "demo_inputs": {
-            "demo_silver_dir": format_artifact_path(demo_silver_dir),
-            "demo_reference_dir": format_artifact_path(demo_reference_dir),
-            "selected_brands_path": format_artifact_path(selected_brands_json_path),
-        },
-    }
-    summary_json_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
+    artifacts.core_scorecard_html_path.write_text(
+        _render_core_scorecard_html(
+            report_bundle=report_bundle,
+            demo_gold=demo_gold,
+            brand_deltas=brand_deltas,
+        ),
         encoding="utf-8",
     )
-    summary_markdown_path.write_text(_render_demo_summary_markdown(payload), encoding="utf-8")
-    return FiveBrandDemoArtifacts(
-        summary_json_path=summary_json_path,
-        summary_markdown_path=summary_markdown_path,
-        selected_brands_json_path=selected_brands_json_path,
-        demo_silver_dir=demo_silver_dir,
-        demo_reference_dir=demo_reference_dir,
+    return artifacts
+
+
+def _render_top_risks(*, report_bundle, demo_gold: pd.DataFrame, brand_deltas: pd.DataFrame) -> str:
+    blocked = demo_gold.loc[demo_gold["publish_status"].eq("blocked")]
+    advisory = demo_gold.loc[demo_gold["publish_status"].eq("advisory")]
+    delta_frame = brand_deltas.copy()
+    delta_frame["abs_relative_error"] = pd.to_numeric(
+        delta_frame["relative_error"], errors="coerce"
+    ).abs()
+    delta_frame = delta_frame.sort_values(
+        by="abs_relative_error",
+        ascending=False,
+        kind="stable",
+        na_position="last",
     )
 
-
-def _render_demo_summary_markdown(payload: dict[str, Any]) -> str:
     lines = [
-        "# 5-Brand Happy-Path Demo",
+        "# Top Risks",
         "",
-        f"- Input workbook: `{payload['input_path']}`",
-        f"- Output root: `{payload['output_root']}`",
-        f"- Selected brands: `{', '.join(payload['selected_brands'])}`",
+        f"- Demo brands: `{len(report_bundle.brand_scorecards)}`",
+        f"- Blocked KPI rows: `{len(blocked)}`",
+        f"- Advisory KPI rows: `{len(advisory)}`",
+        f"- Brands requiring syntheticness review: `{sum(1 for brand in report_bundle.brand_scorecards if brand.review_required)}`",
         "",
-        "## Final Status",
-        "",
-        f"- Validation passed: `{'yes' if payload['validation']['passed'] else 'no'}`",
-        f"- Publishable KPI rows: `{payload['gold_gate']['publishable_count']}`",
-        f"- Advisory KPI rows: `{payload['gold_gate']['advisory_count']}`",
-        f"- Blocked KPI rows: `{payload['gold_gate']['blocked_count']}`",
-        f"- Release preflight passed: `{'yes' if payload['preflight']['passed'] else 'no'}`",
-        "",
-        "## Key Artifacts",
-        "",
-        f"- Demo silver slice: `{payload['demo_inputs']['demo_silver_dir']}`",
-        f"- Demo reference dir: `{payload['demo_inputs']['demo_reference_dir']}`",
-        f"- Validation summary: `{payload['validation']['summary_path']}`",
-        f"- Syntheticness report: `{payload['syntheticness']['report_path']}`",
-        f"- Reconciliation summary: `{payload['reconciliation']['summary_path']}`",
-        f"- Gold decisions: `{payload['gold_gate']['decisions_path']}`",
-        f"- Global report JSON: `{payload['reports']['global_json']}`",
-        f"- Strategy playbook: `{payload['strategy']['playbook_path']}`",
-        f"- Preflight summary: `{payload['preflight']['summary_markdown_path']}`",
+        "## Invariant Failures",
         "",
     ]
+
+    invariant_failures = 0
+    for brand in report_bundle.brand_scorecards:
+        failed = [row for row in brand.invariant_results if row["status"] in {"failed", "warning"}]
+        if not failed:
+            continue
+        invariant_failures += len(failed)
+        messages = "; ".join(str(row["message"]) for row in failed)
+        lines.append(f"- {brand.brand_name}: {messages}")
+    if invariant_failures == 0:
+        lines.append("- None.")
+
+    lines.extend(["", "## Largest Reconciliation Deltas", ""])
+    top_deltas = delta_frame.head(5).to_dict(orient="records")
+    if not top_deltas:
+        lines.append("- None.")
+    else:
+        for row in top_deltas:
+            relative_error = row.get("relative_error")
+            if relative_error is None or pd.isna(relative_error):
+                delta_text = "missing reference delta"
+            else:
+                delta_text = f"{float(relative_error):.1%} delta"
+            lines.append(
+                f"- {row['brand_name']} {row['metric_name']}: workbook `{row['workbook_value']}` vs "
+                f"reference `{row['reference_value']}` ({delta_text}; status `{row['publish_status']}`)"
+            )
+
+    lines.extend(["", "## Publishability Risks", ""])
+    if blocked.empty:
+        lines.append("- No blocked KPI rows in the five-brand slice.")
+    else:
+        for brand_name, frame in blocked.groupby("brand_name", sort=True):
+            metrics = ", ".join(frame["metric_name"].tolist())
+            lines.append(f"- {brand_name}: blocked metrics `{metrics}`")
+
     return "\n".join(lines) + "\n"
 
 
-def _brand_slug(value: str) -> str:
-    return "".join(ch.lower() if ch.isalnum() else "-" for ch in value).strip("-")
+def _render_core_scorecard_html(
+    *, report_bundle, demo_gold: pd.DataFrame, brand_deltas: pd.DataFrame
+) -> str:
+    decision_summary = demo_gold.groupby("canonical_brand_name", sort=True).agg(
+        brand_publish_status_recommendation=("brand_publish_status_recommendation", "first"),
+        publishable_metric_count=("publishable_metric_count", "first"),
+        advisory_metric_count=("advisory_metric_count", "first"),
+        blocked_metric_count=("blocked_metric_count", "first"),
+        provenance_grade=("provenance_grade", "first"),
+    )
+    worst_delta = (
+        brand_deltas.assign(
+            abs_relative_error=pd.to_numeric(brand_deltas["relative_error"], errors="coerce").abs()
+        )
+        .sort_values(
+            by=["canonical_brand_name", "abs_relative_error"],
+            ascending=[True, False],
+            kind="stable",
+        )
+        .groupby("canonical_brand_name", sort=True)
+        .head(1)
+        .set_index("canonical_brand_name")
+    )
+
+    rows: list[str] = []
+    for scorecard in report_bundle.brand_scorecards:
+        summary = decision_summary.loc[scorecard.canonical_brand_name]
+        delta_row = worst_delta.loc[scorecard.canonical_brand_name]
+        invariant_failures = [
+            row for row in scorecard.invariant_results if row["status"] in {"failed", "warning"}
+        ]
+        invariant_text = (
+            "<br>".join(_html_escape(str(row["message"])) for row in invariant_failures)
+            if invariant_failures
+            else "None"
+        )
+        delta_text = (
+            "n/a"
+            if pd.isna(delta_row["relative_error"])
+            else f"{delta_row['metric_name']} ({float(delta_row['relative_error']):.1%})"
+        )
+        rows.append(
+            "<tr>"
+            f"<td><strong>{_html_escape(scorecard.brand_name)}</strong></td>"
+            f"<td>{_html_escape(str(summary['brand_publish_status_recommendation']))}</td>"
+            f"<td>{int(summary['publishable_metric_count'])}/{int(summary['advisory_metric_count'])}/{int(summary['blocked_metric_count'])}</td>"
+            f"<td>{_html_escape(str(summary['provenance_grade']))}</td>"
+            f"<td>{_html_escape(str(scorecard.overall_credibility_grade))}</td>"
+            f"<td>{scorecard.syntheticness_score}</td>"
+            f"<td>{'yes' if scorecard.review_required else 'no'}</td>"
+            f"<td>{_html_escape(delta_text)}</td>"
+            f"<td>{invariant_text}</td>"
+            "</tr>"
+        )
+
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        "<title>Five-Brand Happy-Path Demo Scorecard</title>\n"
+        "<style>"
+        "body{font-family:Arial,sans-serif;margin:24px;color:#16202a;background:#f7f9fb;}"
+        "h1{margin-bottom:8px;}table{border-collapse:collapse;width:100%;background:#fff;}"
+        "th,td{border:1px solid #d9e2ec;padding:10px;vertical-align:top;text-align:left;}"
+        "th{background:#eef3f8;} .meta{margin:0 0 16px 0;color:#51606d;} code{background:#eef3f8;padding:2px 4px;}"
+        "</style>\n"
+        "</head>\n"
+        "<body>\n"
+        "<h1>Five-Brand Happy-Path Demo</h1>\n"
+        '<p class="meta">Rows show publishability, reconciliation, provenance, and syntheticness for '
+        f"<code>{len(report_bundle.brand_scorecards)}</code> manually referenced brands.</p>\n"
+        "<table>\n"
+        "<thead><tr>"
+        "<th>Brand</th><th>Publish recommendation</th><th>P/A/B metrics</th><th>Provenance grade</th>"
+        "<th>Reconciliation grade</th><th>Syntheticness score</th><th>Review required</th>"
+        "<th>Worst delta</th><th>Invariant failures</th>"
+        "</tr></thead>\n"
+        "<tbody>\n" + "\n".join(rows) + "\n</tbody>\n</table>\n</body>\n</html>\n"
+    )
 
 
-def _as_int(value: Any) -> int | None:
+def _score_to_grade(value: Any) -> str:
     if value is None or pd.isna(value):
-        return None
-    return int(value)
+        return "MISSING"
+    score = float(value)
+    if score >= 0.9:
+        return "A"
+    if score >= 0.75:
+        return "B"
+    if score >= 0.6:
+        return "C"
+    if score >= 0.4:
+        return "D"
+    return "F"
 
 
-def _as_float(value: Any) -> float | None:
-    if value is None or pd.isna(value):
-        return None
-    return float(value)
+def _html_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    )
+
+
+__all__ = [
+    "DEMO_BRANDS",
+    "DEMO_COMMAND_NAME",
+    "DemoArtifacts",
+    "DemoHappyPathRun",
+    "run_demo_happy_path",
+]
