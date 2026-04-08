@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from qsr_audit.config import Settings
+from qsr_audit.demo_showcase import write_demo_hub_html
 from qsr_audit.gold import gate_gold_publish
 from qsr_audit.ingest import ingest_workbook
 from qsr_audit.reconcile import load_reference_catalog, reconcile_core_metrics
@@ -47,6 +48,7 @@ class DemoArtifacts:
     core_scorecard_html_path: Path
     brand_deltas_csv_path: Path
     top_risks_markdown_path: Path
+    demo_hub_html_path: Path
     demo_gold_parquet_path: Path
     demo_syntheticness_parquet_path: Path
 
@@ -434,6 +436,7 @@ def _write_demo_outputs(
         core_scorecard_html_path=validation_dir / "core_scorecard.html",
         brand_deltas_csv_path=reconciliation_dir / "brand_deltas.csv",
         top_risks_markdown_path=summary_dir / "top_risks.md",
+        demo_hub_html_path=settings.reports_dir / "demo" / "index.html",
         demo_gold_parquet_path=settings.data_gold / "demo_gold.parquet",
         demo_syntheticness_parquet_path=settings.data_gold / "demo_syntheticness.parquet",
     )
@@ -454,6 +457,13 @@ def _write_demo_outputs(
             brand_deltas=brand_deltas,
         ),
         encoding="utf-8",
+    )
+    write_demo_hub_html(
+        output_path=artifacts.demo_hub_html_path,
+        report_bundle=report_bundle,
+        demo_gold=demo_gold,
+        brand_deltas=brand_deltas,
+        demo_brands=DEMO_BRANDS,
     )
     return artifacts
 

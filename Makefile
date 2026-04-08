@@ -1,4 +1,4 @@
-.PHONY: setup lint test check-hygiene build-package clean-generated clean-caches run-ingest run-validate run-syntheticness run-reconcile run-report run-full-audit
+.PHONY: setup lint test check-hygiene build-package clean-generated clean-caches run-ingest run-validate run-syntheticness run-reconcile run-report run-full-audit demo-bundle
 
 setup:
 	pip install -e ".[dev]"
@@ -49,3 +49,6 @@ run-full-audit:
 	qsr-audit run-syntheticness --input data/silver/core_brand_metrics.parquet
 	qsr-audit reconcile --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
 	qsr-audit report --output reports/
+
+demo-bundle:
+	qsr-audit package-demo
