@@ -22,6 +22,9 @@ ALLOWED_TRACKED = {
     "data/reference/.gitkeep",
     "reports/.gitkeep",
     "strategy/.gitkeep",
+    "artifacts/rag/benchmarks/2026q2_pack_cycle1_bm25/summary.md",
+    "artifacts/rag/benchmarks/2026q2_pack_cycle1_bm25/failure_cases.md",
+    "artifacts/rag/benchmarks/2026q2_pack_cycle1_bm25/per_query_results.parquet",
 }
 ALLOWED_PREFIXES = ("data/reference/",)
 FORBIDDEN_PREFIXES = (
