@@ -23,6 +23,7 @@ from typer.testing import CliRunner
                 "reconcile-qsr50",
                 "audit-reference",
                 "gate-gold",
+                "score-credibility",
                 "snapshot-gold",
                 "build-forecast-panel",
                 "forecast-baseline",
@@ -107,6 +108,14 @@ from typer.testing import CliRunner
                 "Gold publishing gates",
                 "KPI export decisions",
                 "audit scorecard",
+            ],
+        ),
+        (
+            ["score-credibility", "--help"],
+            [
+                "calibrated credibility rollup",
+                "syntheticness benchmark artifacts",
+                "Gold gate",
             ],
         ),
         (
