@@ -1,7 +1,8 @@
 # qsr-audit-pipeline
 
 A Python pipeline for auditing Quick-Service Restaurant (QSR) operational workbooks,
-enforcing data quality through a Bronze → Silver → Gold medallion architecture.
+enforcing data quality through a Bronze -> Silver -> Gold architecture with explicit
+validation, reconciliation, publishing gates, and release controls.
 
 ---
 
@@ -28,6 +29,25 @@ the pipeline surfaces discrepancies explicitly and halts promotion of bad data.
 
 ---
 
+## Current repo status
+
+The core workflow is implemented and in active analyst use:
+
+- workbook ingestion into Bronze and normalized Silver
+- workbook validation and invariant reporting
+- syntheticness diagnostics as a review signal, not proof
+- manual-first reference ingestion
+- QSR50-backed reconciliation expansion
+- primary-source reconciliation for a narrow public-chain slice
+- Gold publishing gates with `publishable`, `advisory`, and `blocked` outcomes
+- release preflight manifests and audit logs
+- a 5-brand end-to-end demo path
+- retrieval-only RAG benchmarking and benchmark authoring workflows
+- forecast-readiness scaffolding based on repeated Gold snapshots
+
+The current bottleneck is evidence collection and analyst review, not missing
+framework code.
+
 ## Bronze / Silver / Gold flow
 
 ```
@@ -39,11 +59,11 @@ data/bronze/       ← raw data parsed into Parquet, schema-tagged, provenance r
     ▼  qsr-audit validate-workbook --input <raw workbook or silver path>
 data/silver/       ← cleaned, normalised, de-duplicated, type-cast
     │
-    ▼  qsr-audit validate-workbook --input data/silver --tolerance-auv 0.05
-data/gold/         ← reconciled, aggregated, ready for reporting
+    ▼  qsr-audit reconcile --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
+data/gold/         ← reconciled, provenance-tagged, policy-gated outputs
     │
-    ▼  qsr-audit report --output reports/
-reports/           ← Audit scorecards plus Gold-only strategy playbooks
+    ▼  qsr-audit gate-gold && qsr-audit preflight-release
+reports/           ← Audit scorecards and release-facing summaries
 ```
 
 Only Gold-layer outputs are safe for downstream reporting and strategy. Bronze and
@@ -70,7 +90,11 @@ qsr-audit run-syntheticness --input data/silver/core_brand_metrics.parquet
 # 5. Reconcile against manual reference inputs
 qsr-audit reconcile --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
 
-# 6. Generate audit and strategy reports from Gold outputs
+# 6. Apply Gold publishing gates and release preflight
+qsr-audit gate-gold
+qsr-audit preflight-release
+
+# 7. Generate audit and strategy reports from Gold outputs
 qsr-audit report --output reports/
 ```
 
@@ -84,6 +108,57 @@ make run-report
 make run-full-audit
 ```
 
+## Main workflows
+
+### Standard audit path
+
+```bash
+qsr-audit ingest-workbook --input data/raw/source_workbook.xlsx
+qsr-audit validate-workbook --input data/silver --tolerance-auv 0.05
+qsr-audit run-syntheticness --input data/silver/core_brand_metrics.parquet
+qsr-audit reconcile --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
+qsr-audit gate-gold
+qsr-audit preflight-release
+qsr-audit report --output reports/
+```
+
+### Five-brand demo path
+
+```bash
+qsr-audit demo-happy-path --input data/raw/<workbook>.xlsx --reference-dir data/reference/
+qsr-audit package-demo
+```
+
+### QSR50 broader reconciliation
+
+```bash
+qsr-audit reconcile-qsr50 --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
+```
+
+### Primary-source public-chain reconciliation
+
+```bash
+qsr-audit reconcile-primary-source --core data/silver/core_brand_metrics.parquet --reference-dir data/reference/
+```
+
+This path is intentionally narrow and conservative:
+
+- it only uses normalized rows from `data/reference/sec_filings_reference.csv`
+- directly comparable primary-source rows outrank QSR50
+- scope mismatches are surfaced explicitly instead of being merged away
+- unresolved issuer/brand mappings are reported instead of fuzzy-matched
+
+### Retrieval benchmarking
+
+```bash
+qsr-audit build-rag-corpus
+qsr-audit init-rag-benchmark --name my-pack --author alice
+qsr-audit eval-rag-retrieval --benchmark-dir data/rag_benchmarks/my-pack --retriever bm25
+```
+
+Retrieval remains offline, benchmark-only, and must not be treated as audited fact
+generation.
+
 ## Documentation
 
 - Contributor workflow: [`CONTRIBUTING.md`](CONTRIBUTING.md)
@@ -95,6 +170,9 @@ make run-full-audit
 - Research model candidates: [`docs/model_candidates.md`](docs/model_candidates.md)
 - Forecasting experiment plan: [`docs/forecasting_experiments.md`](docs/forecasting_experiments.md)
 - Lightweight RAG experiment plan: [`docs/rag_experiments.md`](docs/rag_experiments.md)
+- Security and privacy controls: [`docs/security-privacy-controls.md`](docs/security-privacy-controls.md)
+- Release controls: [`docs/release-runbook.md`](docs/release-runbook.md)
+- Reference backlog: [`docs/reference-evidence-backlog.md`](docs/reference-evidence-backlog.md)
 
 ## Manual Reference Inputs
 
@@ -145,13 +223,13 @@ Primary demo artifacts:
 - [`reports/summary/top_risks.md`](reports/summary/top_risks.md) - concise risk summary for reviewers.
 - [`artifacts/demo_bundle/`](artifacts/demo_bundle/) - packaged copy of the shareable demo outputs.
 
-## Next implementation steps
+## What still needs human work
 
-1. `ingest` -> load the workbook into Bronze with provenance and source metadata.
-2. `normalize` -> standardise column names, types, and business definitions into Silver.
-3. `validate` -> enforce layer-specific schemas and data quality checks.
-4. `reconcile` -> compare claims across sources and promote trusted outputs into Gold.
-5. `report` -> generate audit scorecards and downstream strategy playbooks from Gold only. The rules-based strategy outputs land in `strategy/` and `reports/strategy/` and should be read alongside validation and reconciliation summaries.
+- filling manual reference rows for unresolved brands and metrics
+- reviewing blocked and advisory Gold rows before any external use
+- authoring and adjudicating real retrieval benchmark judgments
+- deciding when a monthly Gold state is clean enough to snapshot for forecasting
+- verifying scope mismatches and contradictions instead of forcing them into publishable facts
 
 ---
 
@@ -196,19 +274,19 @@ pre-commit run --all-files && pytest --cov=src --cov-report=term-missing --cov-f
 
 ---
 
-## Implementation roadmap
+## Implementation snapshot
 
-| # | Module | Status | Description |
-|---|---|---|---|
-| 1 | `ingest` | 🔲 Stub | Parse Excel/CSV into Bronze Parquet |
-| 2 | `normalize` | 🔲 Stub | Standardise schemas, types, column names |
-| 3 | `validate` | 🔲 Stub | Pandera schema checks per layer |
-| 4 | `reconcile` | 🔲 Stub | Cross-source reconciliation & variance flagging |
-| 5 | `reporting` | 🔲 Stub | Jinja2-templated HTML/PDF/Excel reports |
-| 6 | `strategy` | 🟡 Rules-based | Gold-only strategy recommendations and archetype playbooks |
-| 7 | `dashboard` | 🔲 Stub | Interactive audit dashboard (Streamlit/Dash) |
-| 8 | DVC pipeline | 🔲 Stub | Reproducible data pipeline via DVC |
-| 9 | MLflow tracking | 🔲 Stub | Experiment tracking for model-based checks |
+| Area | Status | Notes |
+|---|---|---|
+| Ingestion / normalization | Implemented | Workbook -> Bronze -> Silver flow is live |
+| Validation | Implemented | Invariant checks, scorecards, JSON/Markdown outputs |
+| Reconciliation | Implemented | Manual-first references, QSR50 scale-up, primary-source slice |
+| Gold publishing gates | Implemented | Explicit `publishable` / `advisory` / `blocked` policy |
+| Release controls | Implemented | Manifests, audit logs, `preflight-release` |
+| Demo path | Implemented | 5-brand happy-path bundle and scorecard |
+| Retrieval benchmarking | Implemented, experimental | Offline-only, benchmark-only |
+| Forecasting | Scaffolded, experimental | Requires repeated monthly Gold snapshots |
+| Strategy outputs | Implemented, Gold-only consumer | Must be read with validation and reconciliation context |
 
 ---
 
@@ -220,8 +298,8 @@ qsr-audit-pipeline/
 │   ├── raw/           # Original workbooks (not committed)
 │   ├── bronze/        # Parsed Parquet (not committed)
 │   ├── silver/        # Normalised Parquet (not committed)
-│   ├── gold/          # Reconciled Parquet (not committed)
-│   └── reference/     # Local reference/lookup tables (not committed)
+│   ├── gold/          # Reconciled and gated outputs (mostly ignored; a few review artifacts are committed)
+│   └── reference/     # Local reference tables and committed templates/manual starter data
 ├── src/qsr_audit/     # Main package
 │   ├── cli.py         # Typer CLI entrypoint
 │   ├── config.py      # Pydantic-settings configuration
@@ -237,8 +315,9 @@ qsr-audit-pipeline/
 ├── dashboard/         # Dashboard stub
 ├── dvc/               # DVC pipeline stub
 ├── mlflow/            # MLflow config stub
-├── reports/           # Generated audit outputs and strategy playbooks
+├── reports/           # Generated audit outputs and selected committed demo/reconciliation summaries
 ├── strategy/          # Generated strategy recommendation parquet/json outputs
+├── artifacts/         # Internal manifests, audit logs, forecasting, RAG, and release controls
 ├── docs/
 ├── Makefile
 ├── pyproject.toml
